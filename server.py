@@ -115,7 +115,7 @@ class Handler(BaseHTTPRequestHandler):
                               'progress': p['progress'], 'has_step': bool(p['recommendations']),
                               'goal_reached': all(g['current'] >= g['required'] for g in p['gaps']),
                               'inactive': not any(r['status'] == 'completed' for r in recent)})
-        counts = defaultdict(Counter)
+        counts = {eid: Counter() for eid in STORE.events}
         for row in STORE.history:
             if row['date'] <= STORE.today:
                 counts[row['event_id']][row['status']] += 1

@@ -47,3 +47,6 @@
 - Живой инференс NVIDIA и Ollama не проверялся.
 - GitHub Actions ранее не запускал тесты из-за billing-блокировки аккаунта.
   Указанный результат 21 теста — локальный, а не успешный статус CI.
+
+
+Additional teammate UI/import verification: [QA_PR2.md](QA_PR2.md).

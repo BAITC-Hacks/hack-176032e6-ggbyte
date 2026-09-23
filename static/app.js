@@ -222,7 +222,7 @@ function renderHome() {
           "↗",
         ],
       ],
-    )}<section><div class="section-head"><div><h2>Шаги, которые приближают к цели</h2><p>Выбирай подходящий. Развитие — добровольный выбор.</p></div><button class="btn secondary" id="refresh-ai">✧ Обновить подбор</button></div><div id="ai-state" class="ai-state" role="status">${esc(state.ai?.message || (p.ai.configured ? "Модель подключена. Подбираем шаги…" : "Многофакторный подбор · LLM пока не подключена"))}</div><div id="quests">${quests()}</div></section><div class="lower-grid"><section class="panel"><div class="section-head"><h2>Навыки в фокусе</h2><button class="btn text" id="all-skills">Все навыки ↗</button></div><p class="sub">Текущий уровень / требования ${esc(p.target.grade)}</p>${skillRows(p.gaps.filter((g) => g.current < g.required).slice(0, 5)) || '<p class="notice">Все требования выбранной цели выполнены.</p>'}</section><section class="panel"><div class="section-head"><h2>Твой путь уже начался</h2></div><p class="sub">Последние завершённые активности</p><div class="timeline">${
+    )}<section><div class="section-head"><div><h2>AI-навигатор: следующий шаг</h2><p>При подключении модель выбирает до трёх активностей по разрывам навыков и истории участия. Решение об участии — за вами.</p></div><button class="btn secondary" id="refresh-ai">✧ Обновить подбор</button></div><div id="ai-state" class="ai-state" role="status">${esc(state.ai?.message || (p.ai.configured ? "Модель подключена. Подбираем шаги…" : "Многофакторный подбор · LLM пока не подключена"))}</div><div id="quests">${quests()}</div></section><div class="lower-grid"><section class="panel"><div class="section-head"><h2>Навыки в фокусе</h2><button class="btn text" id="all-skills">Все навыки ↗</button></div><p class="sub">Текущий уровень / требования ${esc(p.target.grade)}</p>${skillRows(p.gaps.filter((g) => g.current < g.required).slice(0, 5)) || '<p class="notice">Все требования выбранной цели выполнены.</p>'}</section><section class="panel"><div class="section-head"><h2>Твой путь уже начался</h2></div><p class="sub">Последние завершённые активности</p><div class="timeline">${
       done
         .slice(0, 4)
         .map(
@@ -275,10 +275,13 @@ async function refreshAI() {
     }
   }
 }
+function profileSkills(profile) {
+  return `<section class="panel"><h2>Все навыки профиля</h2><p class="sub">Текущие уровни с учётом завершённых активностей. Прочерк означает, что навык не входит в требования выбранной цели.</p><div class="table-wrap"><table><thead><tr><th>Навык</th><th>Тип</th><th>Уровень</th><th>Требование цели</th></tr></thead><tbody>${profile.skill_details.map((s) => `<tr><td>${esc(s.name)}</td><td>${s.type === "hard" ? "Профессиональный" : "Гибкий"}</td><td>${esc(s.level)} / 5</td><td>${s.required == null ? "—" : esc(s.required)}</td></tr>`).join("")}</tbody></table></div></section>`;
+}
 function renderSkills() {
   const p = state.profile;
   shell(
-    `${heading("Твоя цель и навыки", "Меняй цель и смотри, какие навыки приблизят тебя к ней.")}<section class="panel"><h2>Куда хочешь двигаться?</h2><form id="goal" class="goal-form"><label class="field">Роль<select name="role">${p.roles.map((r) => `<option ${r === p.target.role ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></label><label class="field">Грейд<select name="grade">${["Junior", "Middle", "Senior", "Lead"].map((g) => `<option ${g === p.target.grade ? "selected" : ""}>${g}</option>`).join("")}</select></label><button class="btn">Сохранить цель</button></form><div class="step-path">${["Junior", "Middle", "Senior", "Lead"].map((g) => `<div class="${g === p.target.grade ? "selected" : ""}"><b>${g}</b><span>${g === p.employee.grade ? "Текущий грейд" : g === p.target.grade ? "Выбранная цель" : "Уровень развития"}</span></div>`).join("")}</div><p class="sub">${esc(p.employee.role)} → ${esc(p.target.role)}. При смене роли доступность мероприятий всё ещё определяется текущей ролью и грейдом.</p></section><div class="lower-grid"><section class="panel"><h2>Требования выбранной цели</h2><p class="sub">◆ Ключевые навыки обязательны для соответствия грейду.</p>${skillRows(p.gaps)}</section><section class="panel"><h2>Как считается прогресс</h2><p class="notice">${p.progress}% — сумма достигнутых уровней, ограниченных требованиями цели, делённая на сумму требуемых уровней.</p><p class="sub">После завершения активности навык растёт на gain, но не выше max_level. Уже достигнутый более высокий уровень не снижается.</p><br><p class="sub">Учтены завершения после последней оценки ${date(p.employee.last_review_date)}. Ранее завершённые активности уже отражены в профиле.</p><br><h3>${p.critical_ready ? "Ключевые навыки соответствуют цели" : "Остались ключевые разрывы"}</h3><p class="sub">Даже высокий общий процент не заменяет достижения каждого ключевого навыка.</p><br><button class="btn secondary" id="back-home">К рекомендованным шагам</button></section></div>`,
+    `${heading("Твоя цель и навыки", "Меняй цель и смотри, какие навыки приблизят тебя к ней.")}<section class="panel"><h2>Куда хочешь двигаться?</h2><form id="goal" class="goal-form"><label class="field">Роль<select name="role">${p.roles.map((r) => `<option ${r === p.target.role ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></label><label class="field">Грейд<select name="grade">${["Junior", "Middle", "Senior", "Lead"].map((g) => `<option ${g === p.target.grade ? "selected" : ""}>${g}</option>`).join("")}</select></label><button class="btn">Сохранить цель</button></form><div class="step-path">${["Junior", "Middle", "Senior", "Lead"].map((g) => `<div class="${g === p.target.grade ? "selected" : ""}"><b>${g}</b><span>${g === p.employee.grade ? "Текущий грейд" : g === p.target.grade ? "Выбранная цель" : "Уровень развития"}</span></div>`).join("")}</div><p class="sub">${esc(p.employee.role)} → ${esc(p.target.role)}. При смене роли доступность мероприятий всё ещё определяется текущей ролью и грейдом.</p></section><div class="lower-grid"><section class="panel"><h2>Требования выбранной цели</h2><p class="sub">◆ Ключевые навыки обязательны для соответствия грейду.</p>${skillRows(p.gaps)}</section><section class="panel"><h2>Как считается прогресс</h2><p class="notice">${p.progress}% — сумма достигнутых уровней, ограниченных требованиями цели, делённая на сумму требуемых уровней.</p><p class="sub">После завершения активности навык растёт на gain, но не выше max_level. Уже достигнутый более высокий уровень не снижается.</p><br><p class="sub">Учтены завершения после последней оценки ${date(p.employee.last_review_date)}. Ранее завершённые активности уже отражены в профиле.</p><br><h3>${p.critical_ready ? "Ключевые навыки соответствуют цели" : "Остались ключевые разрывы"}</h3><p class="sub">Даже высокий общий процент не заменяет достижения каждого ключевого навыка.</p><br><button class="btn secondary" id="back-home">К рекомендованным шагам</button></section></div><br>${profileSkills(p)}`,
   );
   document.getElementById("back-home").onclick = () => navigate("home");
   document.getElementById("goal").onsubmit = async (ev) => {
@@ -411,17 +414,21 @@ function renderHR() {
 }
 function renderImport() {
   shell(
-    `${heading("Загрузка данных", "Добавь проверочные профили и историю участия в формате датасета.")}<section class="panel"><h2>Новые данные — тот же маршрут</h2><p class="sub">Новые ID будут добавлены, совпадающие — обновлены. При ошибке проверки изменения не сохраняются.</p><form id="import-form"><div class="upload-grid"><label class="upload-box field">Профили сотрудников · JSON<p>Объект с employees, массив профилей или один профиль.</p><input id="profiles-file" type="file" accept=".json,application/json"></label><label class="upload-box field">История участия · CSV<p>Исходные столбцы датасета, кодировка UTF-8.</p><input id="history-file" type="file" accept=".csv,text/csv"></label></div><p id="upload-summary" class="sub upload-summary" role="status">Выберите JSON, CSV или оба файла. Общий размер — до 4 МБ.</p><button class="btn" type="submit">Проверить и загрузить</button><p id="import-result" role="status" class="notice" hidden></p><button class="btn secondary" id="open-imported-hr" type="button" hidden>Открыть обзор HR ↗</button></form></section><p class="footer-note">Каталог мероприятий и требования к ролям остаются исходными. После импорта рекомендации и HR-обзор пересчитываются автоматически.</p>`,
+    `${heading("Загрузка данных", "Добавь проверочные профили и историю участия в формате датасета.")}<section class="panel"><h2>Новые данные — тот же маршрут</h2><p class="sub">Новые ID будут добавлены, совпадающие — обновлены. При ошибке проверки изменения не сохраняются.</p><form id="import-form"><div class="upload-grid"><label class="upload-box field">Профили сотрудников · JSON<p>Объект с employees, массив профилей или один профиль.</p><input id="profiles-file" type="file" accept=".json,application/json"></label><label class="upload-box field">История участия · CSV<p>Исходные столбцы датасета, кодировка UTF-8.</p><input id="history-file" type="file" accept=".csv,text/csv"></label></div><details class="import-text"><summary>Вставить JSON / CSV текстом</summary><p class="sub">Можно использовать вместо файлов. Данные проходят ту же проверку.</p><label class="field">Профили JSON<textarea id="profiles-text" rows="7" spellcheck="false" placeholder="{ &quot;employees&quot;: [...] }"></textarea></label><label class="field">История CSV<textarea id="history-text" rows="5" spellcheck="false" placeholder="record_id,employee_id,event_id,date,status,completion_pct"></textarea></label></details><p id="upload-summary" class="sub upload-summary" role="status">Выберите JSON, CSV или оба файла. Общий размер — до 4 МБ.</p><button class="btn" type="submit">Проверить и загрузить</button><p id="import-result" role="status" class="notice" hidden></p><button class="btn secondary" id="open-imported-hr" type="button" hidden>Открыть обзор HR ↗</button></form></section><p class="footer-note">Каталог мероприятий и требования к ролям остаются исходными. После импорта рекомендации и HR-обзор пересчитываются автоматически.</p>`,
   );
   const selectedFiles = () => [document.getElementById("profiles-file").files[0], document.getElementById("history-file").files[0]].filter(Boolean);
   const updateSummary = () => {
     const files = selectedFiles();
-    document.getElementById("upload-summary").textContent = files.length
-      ? `Выбрано файлов: ${files.length} · ${(files.reduce((sum, file) => sum + file.size, 0) / 1000).toFixed(1)} КБ. Готово к проверке.`
-      : "Выберите JSON, CSV или оба файла. Общий размер — до 4 МБ.";
+    const pasted = document.getElementById("profiles-text").value + document.getElementById("history-text").value;
+    const bytes = files.reduce((sum, file) => sum + file.size, 0) + new TextEncoder().encode(pasted).length;
+    document.getElementById("upload-summary").textContent = bytes
+      ? `Файлов: ${files.length}; общий объём файлов и текста: ${(bytes / 1000).toFixed(1)} КБ. Готово к проверке.`
+      : "Выберите файлы или вставьте JSON/CSV. Общий размер — до 4 МБ.";
   };
   document.getElementById("profiles-file").onchange = updateSummary;
   document.getElementById("history-file").onchange = updateSummary;
+  document.getElementById("profiles-text").oninput = updateSummary;
+  document.getElementById("history-text").oninput = updateSummary;
   document.getElementById("open-imported-hr").onclick = () => navigate("hr");
   document.getElementById("import-form").onsubmit = async (ev) => {
     ev.preventDefault();
@@ -436,12 +443,17 @@ function renderImport() {
     try {
       const pf = document.getElementById("profiles-file").files[0],
         hf = document.getElementById("history-file").files[0];
-      if (!pf && !hf) throw new Error("Выберите файл профилей JSON или истории CSV.");
-      if ((pf?.size || 0) + (hf?.size || 0) > 4_000_000)
+      const pastedProfiles = document.getElementById("profiles-text").value.trim();
+      const pastedHistory = document.getElementById("history-text").value.trim();
+      if ((pf && pastedProfiles) || (hf && pastedHistory))
+        throw new Error("Для каждого типа данных выберите один источник: файл или текст.");
+      if (!pf && !hf && !pastedProfiles && !pastedHistory)
+        throw new Error("Выберите файл или вставьте текст JSON/CSV ниже.");
+      if ((pf?.size || 0) + (hf?.size || 0) + new TextEncoder().encode(pastedProfiles + pastedHistory).length > 4_000_000)
         throw new Error("Размер файлов должен быть меньше 4 МБ.");
       const result = await api("/import", {
-        profiles: pf ? await pf.text() : "",
-        history: hf ? await hf.text() : "",
+        profiles: pf ? await pf.text() : pastedProfiles,
+        history: hf ? await hf.text() : pastedHistory,
       });
       out.textContent = `Загружено профилей: ${result.profiles}, записей истории: ${result.records}. Открой «Обзор HR», чтобы выбрать сотрудника.`;
       out.hidden = false;
@@ -452,7 +464,9 @@ function renderImport() {
         "/profile?id=" + encodeURIComponent(state.profile.employee.employee_id),
       );
     } catch (error) {
-      out.textContent = error.message;
+      out.textContent = ["NotFoundError", "NotReadableError"].includes(error.name)
+        ? "Не удалось прочитать файл. Выберите его заново или вставьте содержимое в поля JSON/CSV ниже."
+        : error.message;
       out.className = "notice notice-error";
       out.setAttribute("role", "alert");
       out.hidden = false;

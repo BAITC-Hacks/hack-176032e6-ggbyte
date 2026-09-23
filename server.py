@@ -39,6 +39,12 @@ def public_profile(result):
     result['history'] = [{**r, 'title': STORE.events[r['event_id']]['title']} for r in reversed(result['history'])]
     result['today'] = STORE.today
     result['roles'] = sorted({p['role'] for p in STORE.profiles})
+    result['skill_details'] = [
+        {'skill_id': sid, 'name': STORE.skills[sid]['name'],
+         'type': STORE.skills[sid]['type'], 'level': level,
+         'required': result['target']['required_skills'].get(sid)}
+        for sid, level in sorted(result['skills'].items(), key=lambda item: STORE.skills[item[0]]['name'])
+    ]
     result['ai'] = configuration()
     return result
 

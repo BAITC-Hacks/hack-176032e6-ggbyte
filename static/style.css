@@ -1225,3 +1225,7 @@ td button {
     }
   }
 }
+
+.import-text { margin: 16px 0; }
+.import-text textarea { display: block; width: 100%; min-width: 0; resize: vertical; padding: 12px; border: 1px solid var(--line); border-radius: 10px; font: 13px/1.5 monospace; }
+.import-text textarea:focus-visible { outline: 3px solid #22795c; outline-offset: 3px; }

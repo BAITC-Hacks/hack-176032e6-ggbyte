@@ -40,7 +40,10 @@ def current_skills(employee, history, events, today):
 def progress(levels, target):
     required = target['required_skills']
     total = sum(required.values())
-    return round(100 * sum(min(levels.get(s, 0), n) for s, n in required.items()) / total) if total else 100
+    if not total or all(levels.get(s, 0) >= n for s, n in required.items()):
+        return 100
+    # Rounding must not label an unfinished goal as achieved.
+    return min(99, round(100 * sum(min(levels.get(s, 0), n) for s, n in required.items()) / total))
 
 
 def eligible(event, employee, levels, history, today):

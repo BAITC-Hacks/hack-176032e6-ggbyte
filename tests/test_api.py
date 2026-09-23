@@ -104,6 +104,19 @@ class ApiTests(unittest.TestCase):
         empty = next(e for e in summary['events'] if e['title'] == server.STORE.events['DEMO_FUTURE']['title'])
         self.assertEqual((empty['total'], empty['completed'], empty['missed']), (0, 0, 0))
 
+    def test_profile_includes_skills_outside_selected_goal(self):
+        self.login()
+        profiles = copy.deepcopy(server.STORE.profiles)
+        for target in profiles:
+            if target['grade'] == 'Senior':
+                target['required_skills'].pop('SPEAK')
+        with patch.object(server.STORE, 'profiles', profiles):
+            status, profile = self.call('/api/profile')
+        self.assertEqual(status, 200)
+        speaking = next(s for s in profile['skill_details'] if s['skill_id'] == 'SPEAK')
+        self.assertEqual(speaking['name'], 'Public Speaking')
+        self.assertIsNone(speaking['required'])
+
     def test_cross_origin_mutation_rejected_and_secrets_not_served(self):
         self.assertEqual(self.call('/api/login', {}, 'https://untrusted.example')[0], 403)
         self.assertEqual(self.call('/.env')[0], 404)

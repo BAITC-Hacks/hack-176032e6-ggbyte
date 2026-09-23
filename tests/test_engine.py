@@ -85,6 +85,13 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(result['progress'], 100)
         self.assertEqual(result['recommendations'], [])
 
+    def test_rounding_does_not_hide_small_remaining_gap(self):
+        self.employee['skills'] = {'DESIGN': 4, 'CODE': 4, 'SPEAK': 1.99}
+        result = self.run_recommend()
+        self.assertEqual(result['progress'], 99)
+        self.assertNotIn('Требования цели выполнены', result['empty_reason'])
+        self.assertTrue(any(g['current'] < g['required'] for g in result['gaps']))
+
     def test_llm_cannot_invent_event(self):
         with patch('career.ai.configuration', return_value={'configured': True, 'provider': 'ollama', 'model': 'test'}), patch('career.ai.request_model', return_value=['INVENTED']):
             self.assertEqual(rerank(self.run_recommend())['mode'], 'fallback')

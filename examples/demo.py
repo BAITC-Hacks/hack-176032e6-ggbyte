@@ -21,6 +21,7 @@ def dataset():
                 'develops_skills': [{'skill_id': skill, 'gain': gain, 'max_level': 4}], 'prerequisites': {}, 'upcoming_sessions': [], **extra}
     events = [event('DEMO_DESIGN', 'Практика проектирования систем', 'DESIGN', 2),
               event('DEMO_SPEAK', 'Презентации без стресса', 'SPEAK', 1, type='workshop', format='online', upcoming_sessions=['2026-10-10']),
+              event('DEMO_SPEAK_PRACTICE', 'Практика выступления с обратной связью', 'SPEAK', 1, duration_hours=2, prerequisites={'SPEAK': 1}),
               event('DEMO_CODE', 'Надёжный код', 'CODE', 1, prerequisites={'CODE': 2}),
               event('DEMO_MANDATORY', 'Обязательный инструктаж', 'CODE', 0, mandatory=True, develops_skills=[]),
               event('DEMO_FUTURE', 'Архитектурная лаборатория', 'DESIGN', 1, format='online', upcoming_sessions=['2026-11-01'], prerequisites={'DESIGN': 3})]

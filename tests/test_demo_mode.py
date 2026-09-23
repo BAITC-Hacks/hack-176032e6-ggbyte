@@ -259,6 +259,32 @@ class DemoHttpTests(unittest.TestCase):
         self.login('hr')
         self.assertEqual(self.call('/api/demo/reset', {'employee_id': 'DEMO2'})[0], 400)
 
+    def test_demo_trajectory_unlocks_speaking_practice_and_reaches_complete_goal(self):
+        self.login()
+        initial = self.call('/api/profile')[1]
+        self.assertEqual(initial['progress'], 50)
+        self.assertNotIn('DEMO_SPEAK_PRACTICE', [r['event_id'] for r in initial['recommendations']])
+        self.assertEqual(self.call('/api/complete', {'event_id': 'DEMO_SPEAK_PRACTICE'})[0], 400)
+        for event_id, expected_progress in [('DEMO_DESIGN', 70), ('DEMO_CODE', 80), ('DEMO_SPEAK', 90)]:
+            with self.subTest(event=event_id):
+                status, current = self.call('/api/complete', {'event_id': event_id})
+                self.assertEqual(status, 200)
+                self.assertEqual(current['progress'], expected_progress)
+        self.assertIn('DEMO_SPEAK_PRACTICE', [r['event_id'] for r in current['recommendations']])
+        status, completed = self.call('/api/complete', {'event_id': 'DEMO_SPEAK_PRACTICE'})
+        self.assertEqual(status, 200)
+        self.assertEqual(completed['progress'], 100)
+        self.assertEqual(completed['skills']['SPEAK'], 2)
+        self.assertEqual(completed['recommendations'], [])
+        self.assertEqual(self.call('/api/profile')[1]['progress'], 100)
+        with patch('career.ai.request_model') as model:
+            status, answer = self.call('/api/ai', {})
+            self.assertEqual(status, 200)
+            self.assertEqual(answer['mode'], 'rules')
+            self.assertEqual(answer['recommendations'], [])
+            self.assertIn('Требования цели выполнены', answer['message'])
+            model.assert_not_called()
+
     def test_original_mode_neither_resets_data_nor_calls_cloud_model(self):
         self.store.independent_demo = False
         self.login()

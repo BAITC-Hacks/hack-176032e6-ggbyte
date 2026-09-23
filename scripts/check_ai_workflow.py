@@ -66,11 +66,15 @@ def main():
                 raise ValueError('Unexpected skill or progress after completion.')
             if call('/api/profile')['progress'] != 70:
                 raise ValueError('Progress did not persist.')
+            for event_id in ('DEMO_CODE', 'DEMO_SPEAK', 'DEMO_SPEAK_PRACTICE'):
+                after = call('/api/complete', {'event_id': event_id})
+            if after['progress'] != 100 or after['recommendations']:
+                raise ValueError('Demo path must reach the goal and stop recommending steps.')
             reset = call('/api/demo/reset', {'employee_id': 'E0001'})
             if reset['progress'] != 50 or not reset['ai']['demo_data_allowed']:
                 raise ValueError('Demo reset did not restore the independent scenario.')
             call('/api/logout', {})
-            print(f"PASS: HTTP login -> {config['provider']} / {config['model']} -> validated recommendation -> completion -> saved progress 50% to 70% -> reset 50%; AI {elapsed:.2f}s.")
+            print(f"PASS: HTTP login -> {config['provider']} / {config['model']} -> validated recommendation -> saved progress 50% to 70% -> full path 100% -> reset 50%; AI {elapsed:.2f}s.")
         finally:
             http_server.shutdown()
             http_server.server_close()

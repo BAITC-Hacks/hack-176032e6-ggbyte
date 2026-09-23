@@ -101,6 +101,17 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(result['mode'], 'llm')
             self.assertEqual(result['ids'], ['DEMO_DESIGN'])
 
+    def test_cached_choice_is_remapped_to_current_catalog(self):
+        result = self.run_recommend()
+        changed = copy.deepcopy(result)
+        changed['candidates'][0]['event_id'] = 'NEW_CATALOG_EVENT'
+        with patch('career.ai.CACHE', {}), patch('career.ai.configuration', return_value={'configured': True, 'provider': 'ollama', 'model': 'cache-test'}), patch('career.ai.request_model', return_value=['C1']) as model:
+            self.assertEqual(rerank(result)['ids'], ['DEMO_DESIGN'])
+            cached = rerank(changed)
+            self.assertTrue(cached['cached'])
+            self.assertEqual(cached['ids'], ['NEW_CATALOG_EVENT'])
+            model.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()

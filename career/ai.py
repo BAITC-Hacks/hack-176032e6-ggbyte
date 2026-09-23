@@ -99,7 +99,7 @@ def rerank(result):
     cache_key = hashlib.sha256(json.dumps([config, context], sort_keys=True).encode()).hexdigest()
     cached = CACHE.get(cache_key)
     if cached and cached[0] > time.time() - 600:
-        return {**cached[1], 'cached': True}
+        return {**cached[1], 'ids': [mapping[i] for i in cached[1]['ids']], 'cached': True}
     started = time.monotonic()
     future = POOL.submit(request_model, config, context)
     try:
@@ -110,7 +110,9 @@ def rerank(result):
                   'ids': [mapping[i] for i in ids], 'latency_ms': round((time.monotonic() - started) * 1000)}
         if len(CACHE) > 500:
             CACHE.clear()
-        CACHE[cache_key] = (time.time(), answer)
+        # Cache anonymous choices, not catalog IDs: equal features can belong to
+        # different events after an import or in another employee's profile.
+        CACHE[cache_key] = (time.time(), {**answer, 'ids': ids})
         return answer
     except Exception as exc:
         future.cancel()

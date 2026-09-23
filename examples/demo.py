@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def dataset():
-    meta = {'dataset': 'Independent Career Quest demo', 'as_of_date': '2026-10-01',
+    meta = {'dataset': 'Independent GGBYTE SKILLS demo', 'as_of_date': '2026-10-01',
             'content_version': 2, 'synthetic': True,
             'description': 'Учебные профили, навыки и события созданы для демонстрации. Это не сотрудники или данные банка.'}
     skill_rows = [

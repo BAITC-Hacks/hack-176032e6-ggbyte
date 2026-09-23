@@ -1,4 +1,4 @@
-name: Career Quest checks
+name: GGBYTE SKILLS checks
 on: [push, pull_request]
 jobs:
   test:

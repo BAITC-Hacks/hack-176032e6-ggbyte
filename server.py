@@ -1,4 +1,4 @@
-"""Career Quest: python server.py. Python 3.11+, standard library only."""
+"""GGBYTE SKILLS: python server.py. Python 3.11+, standard library only."""
 import argparse
 import hmac
 import json
@@ -282,7 +282,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main(argv=None, *, bootstrap=False):
     global STORE
-    parser = argparse.ArgumentParser(description='Career Quest — local career navigator')
+    parser = argparse.ArgumentParser(description='GGBYTE SKILLS — local career navigator')
     parser.add_argument('--port', type=int, help='Default: 8001 for AI demo, 8000 for dataset')
     parser.add_argument('--demo-ai', action='store_true', help='Use isolated independent fixtures with AI in runtime/ai-demo')
     parser.add_argument('--dataset', help='Import organizer ZIP into the main data folder')
@@ -320,7 +320,7 @@ def main(argv=None, *, bootstrap=False):
         print(f'Cannot start on port {port}. Another server may be running. Open http://127.0.0.1:{port} or use --port {port + 1}.', flush=True)
         raise SystemExit(1)
     url = f'http://127.0.0.1:{port}'
-    print(f'Career Quest: {url}', flush=True)
+    print(f'GGBYTE SKILLS: {url}', flush=True)
     print('Data mode: independent AI demo (runtime/ai-demo)' if args.demo_ai else 'Data mode: main dataset (data/)', flush=True)
     config = ai_configuration('E0001')
     print(f"AI: {config['provider']} / {config['model']} / {'configured; verified on first recommendation' if config['configured'] else 'disabled; check .env and README'}", flush=True)

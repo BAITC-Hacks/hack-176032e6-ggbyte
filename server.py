@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from career.ai import rerank, load_env, configuration
-from career.engine import recommend, apply_gain, eligible
+from career.engine import recommend, apply_gain, eligible, progress, history_sort_key
 from career.store import Store
 
 ROOT = Path(__file__).resolve().parent
@@ -43,12 +43,36 @@ def public_profile(result):
     result['history'] = [{**r, 'title': STORE.events[r['event_id']]['title']} for r in reversed(result['history'])]
     result['today'] = STORE.today
     result['roles'] = sorted({p['role'] for p in STORE.profiles})
+    result['goal_options'] = []
+    for target in STORE.profiles:
+        requirements = [{'name': STORE.skills[sid]['name'], 'current': result['skills'].get(sid, 0),
+                         'required': level, 'critical': sid in target['critical_skills']}
+                        for sid, level in target['required_skills'].items()]
+        requirements.sort(key=lambda skill: (not skill['critical'], -(skill['required'] - skill['current']), skill['name']))
+        result['goal_options'].append({'role': target['role'], 'grade': target['grade'],
+                                      'progress': progress(result['skills'], target),
+                                      'skill_count': len(requirements),
+                                      'gaps_count': sum(skill['current'] < skill['required'] for skill in requirements),
+                                      'critical_gaps': sum(skill['critical'] and skill['current'] < skill['required'] for skill in requirements),
+                                      'skills': requirements})
     result['skill_details'] = [
         {'skill_id': sid, 'name': STORE.skills[sid]['name'],
          'type': STORE.skills[sid]['type'], 'level': level,
          'required': result['target']['required_skills'].get(sid)}
         for sid, level in sorted(result['skills'].items(), key=lambda item: STORE.skills[item[0]]['name'])
     ]
+    result['catalog'] = []
+    for event in STORE.events.values():
+        after = apply_gain(result['skills'], event)
+        result['catalog'].append({**event,
+            'available': eligible(event, result['employee'], result['skills'], result['history'], STORE.today),
+            'completed': any(row['event_id'] == event['event_id'] and row['status'] == 'completed' for row in result['history']),
+            'projected_progress': progress(after, result['target']),
+            'skill_effects': [{'skill_id': gain['skill_id'], 'name': STORE.skills[gain['skill_id']]['name'],
+                              'before': result['skills'].get(gain['skill_id'], 0), 'after': after[gain['skill_id']]}
+                             for gain in event['develops_skills']],
+            'requirements': [{'name': STORE.skills[sid]['name'], 'current': result['skills'].get(sid, 0), 'required': level}
+                             for sid, level in event['prerequisites'].items()]})
     result['ai'] = ai_configuration(result['employee']['employee_id'])
     result['data_mode'] = 'independent_demo' if STORE.independent_demo else 'dataset'
     return result
@@ -227,8 +251,12 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Активность недоступна или уже завершена.')
             if any(r['event_id'] == event['event_id'] and r['date'] == STORE.today and r['status'] == 'completed' for r in result['history']):
                 raise ValueError('Эта активность уже отмечена сегодня.')
+            # post_action runs under LOCK; the persisted sequence therefore remains
+            # unique across requests and restarts, independently of random record IDs.
+            completion_order = max((history_sort_key(row)[1] for row in STORE.history), default=0) + 1
             STORE.history.append({'record_id': 'D' + secrets.token_hex(8), 'employee_id': eid, 'event_id': event['event_id'], 'date': STORE.today,
-                                  'due_date': '', 'status': 'completed', 'completion_pct': '100', 'score': '', 'feedback_rating': '', 'assigned_by': 'self'})
+                                  'due_date': '', 'status': 'completed', 'completion_pct': '100', 'score': '', 'feedback_rating': '',
+                                  'assigned_by': 'self', 'completion_order': completion_order})
             # If the imported assessment is dated today, it precedes this interactive completion.
             if result['employee']['last_review_date'] >= STORE.today:
                 result['employee']['skills'] = apply_gain(result['employee']['skills'], event)
@@ -237,7 +265,8 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_json({'error': 'Не найдено.'}, 404)
 
     def static(self, path):
-        files = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/favicon.svg': 'favicon.svg'}
+        files = {'/': 'index.html', '/app.js': 'app.js', '/workspace.js': 'workspace.js', '/hr.js': 'hr.js', '/goals.js': 'goals.js', '/catalog.js': 'catalog.js',
+                 '/style.css': 'style.css', '/favicon.svg': 'favicon.svg'}
         name = files.get(path)
         if not name:
             return self.send_json({'error': 'Не найдено.'}, 404)

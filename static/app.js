@@ -22,6 +22,7 @@ const icons = {
   history: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   hr: '<path d="M3 20v-7h5v7m4 0V4h5v16m4 0V9"/>',
   import: '<path d="M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6"/>',
+  catalog: '<path d="M12 5v15M3 4c4-1 6 0 9 2 3-2 5-3 9-2v15c-4-1-6 0-9 2-3-2-5-3-9-2Z"/>',
 };
 const icon = (key) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[key] || icons.home}</svg>`;
@@ -96,19 +97,14 @@ function dataModeBanner() {
   return isDemo() ? '<span class="environment">Демоданные</span>' : "";
 }
 function aiStatus() {
-  const answer = state.ai;
-  const config = state.profile.ai;
-  const label = answer?.mode === "llm"
-    ? "Подбор AI"
-    : answer?.mode === "fallback"
-      ? "AI недоступен · подбор по правилам"
-      : config.configured && !answer ? "Ожидаем ответ AI" : "Подбор по правилам";
-  const message = answer?.message || (config.configured
-    ? "Модель выбирает активности по навыкам, цели и истории участия."
-    : "Рекомендации рассчитаны по навыкам, цели и истории участия без модели.");
-  const timing = answer?.cached ? "Сохранённый ответ модели." : answer?.latency_ms ? `Время ответа: ${(answer.latency_ms / 1000).toFixed(1)} с.` : "";
+  const answer = state.ai, p = state.profile, config = p.ai;
+  const goalReady = p.gaps.every(g => g.current >= g.required);
+  const label = goalReady ? "Цель достигнута" : answer?.mode === "llm" ? "Подбор AI" : answer?.mode === "fallback" ? "AI недоступен · подбор по правилам" : config.configured && !answer ? "Ожидаем ответ AI" : "Подбор по правилам";
+  const message = goalReady ? "Все требования выбранной цели выполнены. Можно обсудить результат с руководителем и выбрать следующую цель."
+    : answer?.message || (config.configured ? "Модель сопоставляет доступные активности с вашей целью, навыками и историей." : "Рекомендации рассчитаны по навыкам, цели и истории участия без модели.");
+  const timing = answer?.cached ? "Сохранённый ответ модели" : answer?.latency_ms ? `Ответ за ${(answer.latency_ms / 1000).toFixed(1)} с` : "";
   const hint = aiSetupHint(config);
-  return `<div class="ai-status-line"><span class="tag ${answer?.mode === "llm" ? "" : "neutral"}">${label}</span><details class="ai-details"><summary>О подборе</summary><p>${esc(message)}</p>${timing ? `<p>${esc(timing)}</p>` : ""}${hint ? `<p>${esc(hint)}</p>` : ""}${isDemo() ? '<p>Облачная обработка разрешена только для исходных демопрофилей. Импортированные данные не получают это разрешение автоматически.</p>' : ""}</details></div>`;
+  return `<div class="ai-summary"><div class="ai-status-line"><span class="tag ${answer?.mode === 'llm' || goalReady ? '' : 'neutral'}">${label}</span>${timing && !goalReady ? `<span class="sub">${esc(timing)}</span>` : ''}</div><p>${esc(message)}</p></div><details class="ai-details"><summary>Как работает подбор</summary><p>Сначала система проверяет роль, грейд, предпосылки и доступность активностей. Модель выбирает до трёх шагов из допустимых кандидатов. Числа и объяснения берутся из профиля и каталога.</p>${hint ? `<p>${esc(hint)}</p>` : ''}${isDemo() ? '<p>Вы работаете с независимыми демопримерами. Импортированные данные не получают разрешение на облачную обработку автоматически.</p>' : ''}</details>`;
 }
 function demoResetControl() {
   if (!isDemo() || state.profile.employee.employee_id !== "E0001") return "";
@@ -160,6 +156,11 @@ function renderLogin() {
     }
   };
 }
+function bindShortcuts() {
+  document.querySelectorAll("[data-open-view]").forEach(button => {
+    button.onclick = () => navigate(button.dataset.openView);
+  });
+}
 function shell(body) {
   const e = state.profile?.employee;
   const isHR = state.session.role === "hr";
@@ -167,11 +168,13 @@ function shell(body) {
     ...(isHR ? [["hr", "Сотрудники"]] : []),
     ["home", "Обзор"],
     ["skills", "Цель и навыки"],
+    ["catalog", "Обучение"],
     ["history", "История"],
     ...(isHR ? [["import", "Импорт"]] : []),
   ];
   app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><img src="/favicon.svg" alt=""><span>Career Quest</span></div><nav class="nav" aria-label="Основная навигация">${nav.map(([key, label]) => `<button data-view="${key}" class="${state.view === key ? "active" : ""}" ${state.view === key ? 'aria-current="page"' : ""}>${icon(key)}${label}</button>`).join("")}</nav></aside><div class="content"><header class="topbar">${dataModeBanner()}<div class="account"><span class="avatar" aria-hidden="true">${isHR ? "HR" : esc(e?.full_name.split(" ").map((n) => n[0]).slice(0, 2).join(""))}</span><span class="account-name">${isHR ? "HR-кабинет" : esc(e?.full_name)}</span><button class="logout" id="logout">Выйти</button></div></header><main class="page">${body}</main></div></div>`;
   document.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => navigate(b.dataset.view)));
+  bindShortcuts();
   const navigation = document.querySelector(".nav");
   const activeItem = navigation.querySelector('[aria-current="page"]');
   if (activeItem && navigation.scrollWidth > navigation.clientWidth) {
@@ -200,12 +203,14 @@ function stats(items) {
 function quests() {
   const p = state.profile;
   const recs = state.ai?.recommendations || p.recommendations;
-  if (!recs.length) return `<div class="empty">${esc(p.empty_reason)}</div>`;
-  return `<div class="quest-grid">${recs.map((r, i) =>
-    `<article class="quest"><div class="quest-top"><span class="tag neutral">${types[r.type] || esc(r.type)}</span>${r.in_progress ? '<span class="tag blue">В процессе</span>' : ""}</div><h3>${esc(r.title)}</h3><div class="quest-meta"><span>${r.duration_hours} ч</span><span>${formats[r.format] || esc(r.format)}</span></div><div class="impact">${r.gains.length
-      ? r.gains.slice(0, 2).map((g) => `${esc(g.name)} <b>${g.before} → ${g.after}</b>`).join("<br>")
-      : `Откроет доступ: ${esc(r.unlocks[0])}`}</div><div class="quest-projection">Прогресс после завершения <b>${p.progress}% → ${r.projected_progress}%</b></div><details><summary>Почему подходит</summary><ul>${r.reasons.map((reason) => `<li>${esc(reason)}</li>`).join("")}</ul><p class="muted">${esc(r.description)}</p><p class="muted">${r.next_session ? "Ближайшая сессия: " + date(r.next_session) : "Можно начать в любое время"}</p></details><button class="btn ${i === 0 ? "" : "secondary"}" data-complete="${esc(r.event_id)}">Отметить выполненным</button></article>`
-  ).join("")}</div>`;
+  if (!recs.length) return `<div class="page-actions"><button class="btn secondary" data-open-view="skills">${p.progress === 100 ? 'Выбрать следующую цель' : 'Посмотреть разрывы навыков'}</button><button class="btn text" data-open-view="history">Посмотреть историю</button></div>`;
+  const cards = `<div class="quest-grid ${recs.length === 1 ? 'quest-grid-single' : ''}">${recs.map((r, i) =>
+    `<article class="quest"><div class="quest-top"><span class="tag ${i === 0 ? '' : 'neutral'}">${i === 0 ? 'Рекомендуемый шаг' : types[r.type] || esc(r.type)}</span>${r.in_progress ? '<span class="tag blue">В процессе</span>' : ''}</div><h3>${esc(r.title)}</h3><div class="quest-meta">${i === 0 ? `<span>${types[r.type] || esc(r.type)}</span>` : ''}<span>${r.duration_hours} ч</span><span>${formats[r.format] || esc(r.format)}</span></div><p class="sub">${r.next_session ? 'Ближайшая сессия: ' + date(r.next_session) : 'Можно начать в удобное время'}</p><div class="impact">${r.gains.length
+      ? r.gains.map(g => `${esc(g.name)} <b>${g.before} → ${g.after}</b>${g.critical ? ' · ключевой' : ''}`).join('<br>')
+      : `Откроет доступ: ${r.unlocks.map(esc).join(', ')}`}</div><div class="quest-projection">Прогресс после завершения <b>${p.progress}% → ${r.projected_progress}%</b></div><details><summary>Почему подходит</summary><ul>${r.reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul><p class="muted">${esc(r.description)}</p></details><button class="btn ${i === 0 ? '' : 'secondary'}" data-complete="${esc(r.event_id)}">Отметить выполненным</button></article>`
+  ).join('')}</div>`;
+  if (recs.length < 2) return cards;
+  return cards + `<details class="panel comparison-panel"><summary>Сравнить предложенные шаги (${recs.length})</summary><p class="sub">Прогноз каждого шага рассчитан отдельно от текущих ${p.progress}%. Проценты не складываются.</p><div class="table-wrap"><table><thead><tr><th>Активность</th><th>Время</th><th>Формат</th><th>Что изменится</th><th>Прогресс</th></tr></thead><tbody>${recs.map(r => `<tr><td>${esc(r.title)}</td><td>${r.duration_hours} ч</td><td>${formats[r.format] || esc(r.format)}</td><td>${r.gains.length ? r.gains.map(g => `${esc(g.name)}: ${g.before} → ${g.after}`).join('<br>') : `Откроет доступ: ${r.unlocks.map(esc).join(', ')}`}</td><td>${p.progress}% → ${r.projected_progress}%</td></tr>`).join('')}</tbody></table></div></details>`;
 }
 function bindCompletions() {
   document.querySelectorAll("[data-complete]").forEach(
@@ -224,7 +229,7 @@ function bindCompletions() {
           toast(
             `Активность завершена. Прогресс: ${before}% → ${state.profile.progress}%.`,
           );
-          refreshAI();
+          if (state.view === "home") refreshAI();
         } catch (error) {
           toast(error.message);
           button.disabled = false;
@@ -235,16 +240,22 @@ function bindCompletions() {
 function renderHome() {
   const p = state.profile, e = p.employee;
   const isHR = state.session.role === "hr";
-  const done = p.history.filter((r) => r.status === "completed").length;
-  const closed = p.gaps.filter((g) => g.current >= g.required).length;
-  const critical = p.gaps.filter((g) => g.critical && g.current < g.required).length;
-  shell(`${isHR ? '<button class="btn text" id="back-staff">← К сотрудникам</button>' : ""}${heading(isHR ? esc(e.full_name) : "Моё развитие", `${esc(e.role)} · ${esc(e.grade)}`)}<section class="panel goal-summary"><div><p class="goal-label">Карьерная цель</p><h2>${esc(p.target.role)} · ${esc(p.target.grade)}</h2><button class="btn text" id="edit-goal">Изменить цель</button></div><div class="goal-progress"><div class="skill-label"><span>Соответствие цели</span><strong>${p.progress}%</strong></div><div class="bar" role="progressbar" aria-label="Соответствие навыков цели" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p.progress}"><span style="width:${p.progress}%"></span></div></div></section><div class="goal-metrics"><span>Навыки на уровне цели: <b>${closed} из ${p.gaps.length}</b></span><span>Ключевые навыки для развития: <b>${critical}</b></span><span>Завершено активностей: <b>${done}</b></span></div><section id="ai-navigator" aria-labelledby="ai-heading"><div class="section-head"><h2 id="ai-heading">Рекомендации</h2><button class="btn secondary" id="refresh-ai">Обновить</button></div><div id="ai-state" class="ai-state" role="status">${aiStatus()}</div><div id="quests">${quests()}</div></section>${demoResetControl()}`);
+  const done = p.history.filter(r => r.status === "completed").length;
+  const closed = p.gaps.filter(g => g.current >= g.required).length;
+  const critical = p.gaps.filter(g => g.critical && g.current < g.required).length;
+  shell(`${isHR ? '<button class="btn text" id="back-staff">← К сотрудникам</button>' : ""}
+    ${heading(isHR ? esc(e.full_name) : "Моё развитие", `${esc(e.role)} · ${esc(e.grade)} · данные на ${date(p.today)}`)}
+    <section class="panel goal-summary"><div><p class="goal-label">Мой карьерный маршрут</p><h2>${esc(p.target.role)} · ${esc(p.target.grade)}</h2><p class="sub">Из текущего профиля: ${esc(e.role)} · ${esc(e.grade)}</p><button class="btn text" id="edit-goal">${p.progress === 100 ? "Выбрать следующую цель" : "Изменить цель"}</button></div><div class="goal-progress"><div class="skill-label"><span>Соответствие цели</span><strong>${p.progress}%</strong></div><div class="bar" role="progressbar" aria-label="Соответствие навыков цели" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p.progress}"><span style="width:${p.progress}%"></span></div><p class="sub">${closed} из ${p.gaps.length} навыков на нужном уровне</p></div></section>
+    <div class="inline-metrics overview-metrics"><div class="metric-item"><strong>${critical}</strong><span>Ключевых навыков для развития</span></div><div class="metric-item"><strong>${done}</strong><span>Завершённых активностей</span></div><div class="metric-item"><strong>${p.history.filter(r => r.status === 'in_progress').length}</strong><span>Записей со статусом «В процессе»</span></div></div>
+    <section id="ai-navigator" aria-labelledby="ai-heading"><div class="section-head"><div><h2 id="ai-heading">AI-навигатор</h2><p class="sub">Следующие шаги к выбранной цели</p></div><button class="btn secondary" id="refresh-ai">Обновить подбор</button></div><div class="decision-factors"><span>Цель и грейд</span><span>Разрывы навыков</span><span>История участия</span></div><div id="ai-state" class="ai-state" role="status">${aiStatus()}</div><div id="quests">${quests()}</div></section>
+    ${CareerViews.dashboard(p)}${demoResetControl()}`);
   document.getElementById("edit-goal").onclick = () => navigate("skills");
   if (isHR) document.getElementById("back-staff").onclick = () => navigate("hr");
   document.getElementById("refresh-ai").onclick = () => refreshAI();
   bindCompletions();
   bindDemoReset();
 }
+
 async function refreshAI() {
   const request = ++state.request;
   const eid = state.profile.employee.employee_id;
@@ -270,6 +281,7 @@ async function refreshAI() {
       document.getElementById("ai-state").innerHTML = aiStatus();
       document.getElementById("quests").innerHTML = quests();
       bindCompletions();
+      bindShortcuts();
     }
   } catch (error) {
     if (request === state.request) {
@@ -279,130 +291,72 @@ async function refreshAI() {
         currentStatus.innerHTML = aiStatus();
         document.getElementById("quests").innerHTML = quests();
         bindCompletions();
+        bindShortcuts();
       }
       toast(error.message);
     }
   } finally {
     if (request === state.request && button?.isConnected) {
       button.disabled = false;
-      button.textContent = "Обновить";
+      button.textContent = "Обновить подбор";
     }
   }
 }
 function profileSkills(profile) {
-  const skills = new Map(profile.skill_details.map((s) => [s.skill_id, s]));
-  for (const gap of profile.gaps) {
-    if (!skills.has(gap.skill_id)) {
-      skills.set(gap.skill_id, { ...gap, level: gap.current });
-    }
-  }
-  return `<section class="panel"><div class="section-head"><h2>Навыки</h2><span class="sub">Уровни от 0 до 5</span></div><div class="table-wrap"><table><thead><tr><th>Навык</th><th>Тип</th><th>Сейчас</th><th>Для цели</th></tr></thead><tbody>${[...skills.values()].sort((a, b) => a.name.localeCompare(b.name, "ru")).map((s) => {
-    const gap = profile.gaps.find((g) => g.skill_id === s.skill_id);
-    return `<tr><td>${esc(s.name)}${gap?.critical ? '<small class="critical-mark">Ключевой</small>' : ""}</td><td>${s.type === "hard" ? "Профессиональный" : s.type === "soft" ? "Гибкий" : "—"}</td><td>${esc(s.level)}</td><td>${s.required == null ? "—" : esc(s.required)}</td></tr>`;
-  }).join("")}</tbody></table></div><p class="sub">Ключевые навыки обязательны. Прочерк в «Для цели» — навык не требуется.</p></section>`;
+  return CareerViews.skills(profile);
 }
+
 function renderSkills() {
   const p = state.profile;
-  shell(`${heading("Цель и навыки", `${state.session.role === "hr" ? esc(p.employee.full_name) + " · " : ""}${esc(p.employee.role)} · ${esc(p.employee.grade)}`)}<div class="stack"><section class="panel"><h2>Карьерная цель</h2><form id="goal" class="goal-form"><label class="field">Роль<select name="role">${p.roles.map((r) => `<option ${r === p.target.role ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></label><label class="field">Грейд<select name="grade">${["Junior", "Middle", "Senior", "Lead"].map((g) => `<option ${g === p.target.grade ? "selected" : ""}>${g}</option>`).join("")}</select></label><button class="btn">Сохранить цель</button></form></section>${profileSkills(p)}<details class="panel calculation"><summary>Как считается прогресс · ${p.progress}%</summary><p>Прогресс — доля требований цели, которой соответствуют текущие навыки. Уровень сверх требования не увеличивает процент.</p><p>Учтены завершённые активности после оценки ${date(p.employee.last_review_date)}. Повторное обучение повышает навык только до уровня, предусмотренного активностью; достигнутые уровни не снижаются.</p><p>Доступность активностей определяется текущей ролью и грейдом. Для соответствия цели нужно развить каждый ключевой навык. Решение о повышении принимает руководитель после оценки.</p></details></div>`);
+  shell(`${heading("Цель и навыки", `${state.session.role === "hr" ? esc(p.employee.full_name) + " · " : ""}${esc(p.employee.role)} · ${esc(p.employee.grade)}`)}<div class="stack"><section class="panel"><h2>Карьерная цель</h2><form id="goal" class="goal-form"><label class="field">Роль<select name="role">${p.roles.map((r) => `<option ${r === p.target.role ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></label><label class="field">Грейд<select name="grade">${["Junior", "Middle", "Senior", "Lead"].map((g) => `<option ${g === p.target.grade ? "selected" : ""}>${g}</option>`).join("")}</select></label><button class="btn">Сохранить цель</button></form></section>${CareerGoals.markup(p)}${profileSkills(p)}<details class="panel calculation"><summary>Как считается прогресс · ${p.progress}%</summary><p>Прогресс — доля требований цели, которой соответствуют текущие навыки. Уровень сверх требования не увеличивает процент.</p><p>Учтены завершённые активности после оценки ${date(p.employee.last_review_date)}. Повторное обучение повышает навык только до уровня, предусмотренного активностью; достигнутые уровни не снижаются.</p><p>Доступность активностей определяется текущей ролью и грейдом. Для соответствия цели нужно развить каждый ключевой навык. Решение о повышении принимает руководитель после оценки.</p></details></div>`);
+  CareerViews.bindSkills(p);
+  const selectGoal = async (goal) => {
+    state.profile = await api("/goal", { ...goal, employee_id: p.employee.employee_id });
+    state.ai = null;
+    state.request++;
+    render();
+    toast("Карьерная цель обновлена.");
+  };
+  CareerGoals.bind(p, selectGoal);
   document.getElementById("goal").onsubmit = async (ev) => {
     ev.preventDefault();
     const button = ev.target.querySelector("button");
     button.disabled = true;
     try {
-      state.profile = await api("/goal", {
-        ...Object.fromEntries(new FormData(ev.target)),
-        employee_id: p.employee.employee_id,
-      });
-      state.ai = null;
-      state.request++;
-      render();
-      toast("Карьерная цель обновлена.");
+      await selectGoal(Object.fromEntries(new FormData(ev.target)));
     } catch (error) {
       toast(error.message);
       button.disabled = false;
     }
   };
 }
+
 function renderHistory() {
   const p = state.profile;
-  shell(
-    `${heading("История", state.session.role === "hr" ? esc(p.employee.full_name) : "")}<section class="panel"><div class="filters"><label for="history-filter">Показать</label><select id="history-filter"><option value="all">Все статусы</option>${Object.entries(
-      labels,
-    )
-      .map(([k, v]) => `<option value="${k}">${v}</option>`)
-      .join(
-        "",
-      )}</select></div><div class="table-wrap"><table><thead><tr><th>Активность</th><th>Дата</th><th>Статус</th><th>Выполнение</th></tr></thead><tbody id="history-body"></tbody></table></div></section>`,
-  );
-  function rows(filter) {
-    document.getElementById("history-body").innerHTML =
-      p.history
-        .filter((r) => filter === "all" || r.status === filter)
-        .map(
-          (r) =>
-            `<tr><td>${esc(r.title)}</td><td>${date(r.date)}</td><td><span class="tag ${r.status === "completed" ? "" : r.status === "in_progress" ? "blue" : "amber"}">${labels[r.status]}</span></td><td>${esc(r.completion_pct)}%</td></tr>`,
-        )
-        .join("") ||
-      '<tr><td colspan="4">Активностей с этим статусом пока нет.</td></tr>';
-  }
-  rows("all");
-  document.getElementById("history-filter").onchange = (e) =>
-    rows(e.target.value);
+  shell(`${heading("История развития", state.session.role === "hr" ? esc(p.employee.full_name) : "Все шаги и результаты в одном месте")}${CareerViews.history(p)}`);
+  CareerViews.bindHistory(p);
 }
+
+function renderCatalog() {
+  const p = state.profile;
+  shell(`${heading("Каталог обучения", `${esc(p.employee.full_name)} · цель: ${esc(p.target.role)} · ${esc(p.target.grade)}`)}${CareerCatalog.markup(p)}`);
+  CareerCatalog.bind(p, bindCompletions);
+}
+
 function renderHR() {
-  const h = state.hr;
-  const count = h.employees.length;
-  shell(`${heading("Сотрудники", `Данные на ${date(state.profile.today)}`)}${stats([
-    [count, "Всего сотрудников"],
-    [h.employees.filter((e) => !e.has_step && !e.goal_reached).length, "Без доступного шага"],
-    [h.employees.filter((e) => e.inactive).length, "Без завершений за 90 дней"],
-    [h.employees.filter((e) => e.goal_reached).length, "Достигли цели по навыкам"],
-  ])}<section class="panel"><div class="filters"><input id="employee-search" class="search" placeholder="Имя, ID или роль" aria-label="Поиск сотрудника"><select id="employee-filter" aria-label="Фильтр сотрудников"><option value="all">Все сотрудники</option><option value="no_step">Нет доступного шага</option><option value="goal_reached">Цель достигнута</option><option value="inactive">Нет завершений 90 дней</option></select><button class="btn secondary" id="reset-employee-filters">Сбросить</button></div><p id="employee-count" class="sub" role="status"></p><div class="table-wrap"><table><thead><tr><th>Сотрудник</th><th>Роль / грейд</th><th>Прогресс</th><th>Статус</th></tr></thead><tbody id="employee-body"></tbody></table></div></section><div class="hr-grid"><section class="panel"><h2>Навыки для развития</h2><p class="sub">Сотрудники, не достигшие уровня своей цели</p>${h.gaps.slice(0, 7).map((g) => `<div class="skill"><div class="skill-label"><strong>${esc(g.name)}</strong><span>${g.count} чел.</span></div><div class="bar"><span style="width:${count ? (g.count / count) * 100 : 0}%"></span></div></div>`).join("") || '<p class="notice">Все сотрудники достигли требований своих целей.</p>'}</section><section class="panel"><h2>Участие в активностях</h2><p class="sub">За весь период данных</p><div class="table-wrap activity-table"><table><thead><tr><th>Активность</th><th>Завершено / всего</th><th>Пропуски и отказы</th></tr></thead><tbody>${h.events.slice().sort((a, b) => b.total - a.total).map((e) => `<tr><td>${esc(e.title)}</td><td>${e.completed} / ${e.total}</td><td>${e.missed}</td></tr>`).join("") || '<tr><td colspan="3" class="table-empty">Истории участия пока нет.</td></tr>'}</tbody></table></div></section></div><p class="footer-note">Достижение цели по навыкам не означает автоматическое повышение.</p>`);
-  function rows() {
-    const q = document.getElementById("employee-search").value.trim().toLowerCase();
-    const f = document.getElementById("employee-filter").value;
-    const employees = h.employees
-        .filter(
-          (e) =>
-            (e.full_name + " " + e.employee_id + " " + e.role)
-              .toLowerCase()
-              .includes(q) &&
-            (f === "all" ||
-              (f === "no_step" && !e.has_step && !e.goal_reached) ||
-              (f === "goal_reached" && e.goal_reached) ||
-              (f === "inactive" && e.inactive)),
-        );
-    document.getElementById("employee-count").textContent = `Показано: ${employees.length} из ${count}`;
-    document.getElementById("employee-body").innerHTML = employees.map(
-          (e) =>
-            `<tr><td><button class="btn text" data-employee="${esc(e.employee_id)}">${esc(e.full_name)}</button><br><small class="muted">${esc(e.employee_id)}</small></td><td>${esc(e.role)}<br><small class="muted">${esc(e.grade)}</small></td><td>${e.progress}%</td><td><span class="tag ${e.goal_reached ? "blue" : e.has_step ? "" : "amber"}">${e.goal_reached ? "Цель достигнута" : e.has_step ? "Шаг подобран" : "Нужен план с HR"}</span></td></tr>`,
-        )
-        .join("") || '<tr><td colspan="4" class="table-empty">Нет сотрудников по выбранным условиям. Измените поиск или нажмите «Сбросить».</td></tr>';
-    document.querySelectorAll("[data-employee]").forEach(
-      (b) =>
-        (b.onclick = async () => {
-          try {
-            state.request++;
-            state.profile = await api(
-              "/profile?id=" + encodeURIComponent(b.dataset.employee),
-            );
-            state.ai = null;
-            await navigate("home");
-          } catch (error) {
-            toast(error.message);
-          }
-        }),
-    );
-  }
-  rows();
-  document.getElementById("employee-search").oninput = rows;
-  document.getElementById("employee-filter").onchange = rows;
-  document.getElementById("reset-employee-filters").onclick = () => {
-    document.getElementById("employee-search").value = "";
-    document.getElementById("employee-filter").value = "all";
-    rows();
-  };
+  shell(HRViews.markup(state.hr, state.profile.today));
+  HRViews.bind(state.hr, async (employeeId) => {
+    try {
+      state.request++;
+      state.profile = await api("/profile?id=" + encodeURIComponent(employeeId));
+      state.ai = null;
+      await navigate("home");
+    } catch (error) {
+      toast(error.message);
+    }
+  }, () => navigate("import"));
 }
+
 function renderImport() {
   shell(`${heading("Импорт данных")}<section class="panel"><p class="sub">Новые ID добавляются, существующие обновляются. При ошибке проверки изменения не сохраняются.</p><form id="import-form"><div class="upload-grid"><label class="upload-box field">Профили · JSON<input id="profiles-file" type="file" accept=".json,application/json"></label><label class="upload-box field">История участия · CSV<input id="history-file" type="file" accept=".csv,text/csv"></label></div><details class="import-text"><summary>Вставить данные текстом</summary><label class="field">Профили JSON<textarea id="profiles-text" rows="7" spellcheck="false" placeholder="{ &quot;employees&quot;: [...] }"></textarea></label><label class="field">История CSV<textarea id="history-text" rows="5" spellcheck="false" placeholder="record_id,employee_id,event_id,date,status,completion_pct"></textarea></label></details><details class="import-text"><summary>Требования к данным</summary><p>JSON: объект с employees, массив профилей или один профиль. CSV: исходные столбцы датасета, кодировка UTF-8. Можно загрузить один или оба типа данных.</p><p>Каталог активностей и требования к ролям не меняются. Рекомендации и аналитика обновятся автоматически.</p>${isDemo() ? '<p>Импорт не разрешает отправку профилей в облачную AI-модель.</p>' : ""}</details><p id="upload-summary" class="sub upload-summary" role="status">Файл или текст · до 4 МБ суммарно</p><button class="btn" type="submit">Проверить и загрузить</button><p id="import-result" role="status" class="notice" hidden></p><button class="btn secondary" id="open-imported-hr" type="button" hidden>К сотрудникам</button></form></section>`);
   const selectedFiles = () => [document.getElementById("profiles-file").files[0], document.getElementById("history-file").files[0]].filter(Boolean);
@@ -470,6 +424,7 @@ function render() {
     ({
       home: renderHome,
       skills: renderSkills,
+      catalog: renderCatalog,
       history: renderHistory,
       hr: renderHR,
       import: renderImport,

@@ -71,12 +71,17 @@ class Store:
         self.events = {e['event_id']: e for e in read('events.json')['events']}
         initial = read('employees.json')
         self.today = initial['meta']['as_of_date']
+        self.demo_content_version = initial['meta'].get('content_version', 1) if independent_demo else 0
         row = self.db.execute('SELECT content FROM state WHERE id=1').fetchone()
         if row:
             saved = json.loads(row[0])
             self.employees, self.history = saved['employees'], saved['history']
             # Legacy state has no provenance: fail closed instead of trusting IDs.
             self.untrusted_employee_ids = set(saved.get('untrusted_employee_ids', [e['employee_id'] for e in self.employees]))
+            if independent_demo:
+                self.demo_content_version = saved.get('demo_content_version', 1)
+                if 'untrusted_employee_ids' in saved:
+                    self.upgrade_demo_content()
         else:
             self.employees = initial['employees']
             with (self.root / 'data' / 'activity_history.csv').open(encoding='utf-8-sig', newline='') as f:
@@ -87,6 +92,37 @@ class Store:
         self.credentials = json.loads(credentials_path.read_text()) if credentials_path.exists() else {}
         self.ensure_credentials()
         self.save()
+
+    def upgrade_demo_content(self):
+        """Add authored demo content once; preserve user progress and imported profiles."""
+        from examples.demo import dataset
+        fixtures = dataset()
+        version = fixtures['employees']['meta'].get('content_version', 1)
+        if self.demo_content_version >= version:
+            return
+        existing = {employee['employee_id']: employee for employee in self.employees}
+        trusted = set()
+        for seed in fixtures['employees']['employees']:
+            eid = seed['employee_id']
+            if eid in self.untrusted_employee_ids:
+                continue
+            trusted.add(eid)
+            if eid not in existing:
+                self.employees.append(seed)
+                existing[eid] = seed
+            else:
+                for skill_id, level in seed['skills'].items():
+                    existing[eid]['skills'].setdefault(skill_id, level)
+        record_ids = {record['record_id'] for record in self.history}
+        for record in fixtures['history']:
+            if record['employee_id'] in trusted and record['record_id'] not in record_ids:
+                # E0001 may have a reset history with regenerated IDs. Its old
+                # three seed records must not be recreated during enrichment.
+                if record['employee_id'] == 'E0001':
+                    continue
+                self.history.append(record)
+                record_ids.add(record['record_id'])
+        self.demo_content_version = version
 
     def ensure_credentials(self):
         for e in self.employees:
@@ -101,7 +137,8 @@ class Store:
     def save(self):
         with self.db:
             self.db.execute('INSERT OR REPLACE INTO state VALUES (1,?)', (json.dumps({'employees': self.employees, 'history': self.history,
-                            'untrusted_employee_ids': sorted(self.untrusted_employee_ids)}, ensure_ascii=False),))
+                            'untrusted_employee_ids': sorted(self.untrusted_employee_ids),
+                            'demo_content_version': self.demo_content_version}, ensure_ascii=False),))
 
     def demo_data_allowed(self, eid):
         return bool(self.independent_demo and eid in self.demo_employee_ids and eid not in self.untrusted_employee_ids)

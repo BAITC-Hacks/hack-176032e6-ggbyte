@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from career.engine import apply_gain, current_skills, recommend
+from career.engine import apply_gain, current_skills, recommend, history_sort_key
 from career.store import Store
 from career.ai import rerank
 from examples.demo import dataset, write
@@ -44,6 +44,29 @@ class EngineTests(unittest.TestCase):
     def test_cap_never_reduces_existing_skill(self):
         self.assertEqual(apply_gain({'DESIGN': 5}, self.events['DEMO_DESIGN'])['DESIGN'], 5)
 
+    def test_same_day_completion_sequence_preserves_courses_with_different_caps(self):
+        first = {'record_id': 'Z_FIRST', 'employee_id': 'E0001', 'event_id': 'DEMO_ANALYSIS_BASE',
+                 'date': '2026-10-01', 'status': 'completed', 'completion_pct': 100, 'completion_order': 1}
+        second = {**first, 'record_id': 'A_SECOND', 'event_id': 'DEMO_ANALYSIS_ADV', 'completion_order': 2}
+        self.history.extend([first, second])
+        expected = apply_gain(apply_gain(self.employee['skills'], self.events['DEMO_ANALYSIS_BASE']), self.events['DEMO_ANALYSIS_ADV'])
+        self.assertEqual(expected['ANALYSIS'], 5)
+        self.assertEqual(current_skills(self.employee, self.history, self.events, '2026-10-01'), expected)
+        result = self.run_recommend()
+        self.assertEqual(result['skills']['ANALYSIS'], 5)
+        self.assertEqual([row['record_id'] for row in result['history'][-2:]], ['Z_FIRST', 'A_SECOND'])
+
+    def test_legacy_history_order_is_preserved_and_invalid_sequences_are_ignored(self):
+        rows = [{'date': '2026-10-01', 'record_id': 'Z', 'completion_order': 1},
+                {'date': '2026-10-01', 'record_id': 'B'},
+                {'date': '2026-09-30', 'record_id': 'EARLIER', 'completion_order': 100},
+                {'date': '2026-10-01', 'record_id': 'A'}]
+        self.assertEqual([row['record_id'] for row in sorted(rows, key=history_sort_key)], ['EARLIER', 'A', 'B', 'Z'])
+        for invalid in (None, True, False, '2000', 2.5, 0, -1):
+            with self.subTest(order=invalid):
+                self.assertEqual(history_sort_key({'date': '2026-10-01', 'record_id': 'A', 'completion_order': invalid}),
+                                 ('2026-10-01', 0, 'A'))
+
     def test_unknown_goal_is_not_silently_used(self):
         with tempfile.TemporaryDirectory() as path:
             write(path); store = Store(path)
@@ -61,9 +84,9 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(store.merge(json.dumps({'employees': [new]}), '')['profiles'], 1)
             with self.assertRaises(ValueError):
                 store.merge('', 'record_id,employee_id,event_id,date,status,completion_pct\nBAD,JURY1,INVALID,2026-09-01,completed,100')
-            self.assertEqual(len(store.history), 3)
+            self.assertEqual(len(store.history), len(dataset()['history']))
             store.db.close(); reopened = Store(path)
-            self.assertEqual(len(reopened.employees), 4)
+            self.assertEqual(len(reopened.employees), len(dataset()['employees']['employees']) + 1)
             reopened.db.close()
 
     def test_imported_history_updates_new_profile_skills(self):

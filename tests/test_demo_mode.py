@@ -102,7 +102,7 @@ class DemoStoreTests(unittest.TestCase):
             self.assertFalse(self.store.demo_data_allowed(employee['employee_id']))
 
     def test_reset_restores_only_own_fixture_and_persists(self):
-        original_history = copy.deepcopy(self.store.history)
+        original_history = copy.deepcopy([row for row in self.store.history if row['employee_id'] == 'E0001'])
         modified = copy.deepcopy(self.store.employees[0])
         modified['skills']['DESIGN'] = 5
         modified['career_goal']['target_grade'] = 'Lead'
@@ -284,6 +284,45 @@ class DemoHttpTests(unittest.TestCase):
             self.assertEqual(answer['recommendations'], [])
             self.assertIn('Требования цели выполнены', answer['message'])
             model.assert_not_called()
+
+    def test_same_day_completions_keep_order_with_reverse_ids_and_reach_lead(self):
+        self.login()
+        self.assertEqual(self.call('/api/goal', {'role': 'Data Analyst', 'grade': 'Lead'})[0], 200)
+        # Invalid imported metadata must not seed the integer completion counter.
+        self.store.history[0]['completion_order'] = '99999'
+        self.store.history[1]['completion_order'] = True
+        descending_ids = [f'{1000 - index:016x}' for index in range(len(self.store.events))]
+        chosen = []
+        with patch.object(self.server_module.secrets, 'token_hex', side_effect=descending_ids):
+            for event_id, expected in [('DEMO_ANALYSIS_BASE', 3), ('DEMO_ANALYSIS_ADV', 5)]:
+                status, current = self.call('/api/complete', {'event_id': event_id})
+                self.assertEqual(status, 200)
+                self.assertEqual(current['skills']['ANALYSIS'], expected)
+                chosen.append(event_id)
+            for _ in range(len(self.store.events) - len(chosen)):
+                if current['progress'] == 100:
+                    break
+                self.assertTrue(current['recommendations'], current['gaps'])
+                step = current['recommendations'][0]
+                status, current = self.call('/api/complete', {'event_id': step['event_id']})
+                self.assertEqual(status, 200)
+                self.assertEqual(current['progress'], step['projected_progress'])
+                chosen.append(step['event_id'])
+        self.assertEqual(current['progress'], 100)
+        own = [row for row in self.store.history if row['employee_id'] == 'E0001' and row['status'] == 'completed']
+        self.assertEqual([row['event_id'] for row in own], chosen)
+        self.assertEqual([row['completion_order'] for row in own], list(range(1, len(own) + 1)))
+        self.assertGreater(own[0]['record_id'], own[1]['record_id'])
+        reopened = Store(self.directory.name, independent_demo=True)
+        try:
+            persisted = next(employee for employee in reopened.employees if employee['employee_id'] == 'E0001')
+            replay = recommend(persisted, reopened.history, reopened.events, reopened.skills, reopened.profiles, reopened.today)
+            self.assertEqual(replay['progress'], 100)
+            self.assertEqual(replay['skills']['ANALYSIS'], 5)
+            self.assertEqual([row['completion_order'] for row in reopened.history if row['employee_id'] == 'E0001' and row['status'] == 'completed'],
+                             list(range(1, len(own) + 1)))
+        finally:
+            reopened.db.close()
 
     def test_original_mode_neither_resets_data_nor_calls_cloud_model(self):
         self.store.independent_demo = False

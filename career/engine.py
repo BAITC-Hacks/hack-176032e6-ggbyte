@@ -5,6 +5,15 @@ GRADES = ['Junior', 'Middle', 'Senior', 'Lead']
 NEGATIVE = {'no_show', 'declined', 'dropped'}
 
 
+def history_sort_key(row):
+    """Keep legacy ordering, then apply same-day interactive completions in sequence."""
+    order = row.get('completion_order', 0)
+    # CSV strings, booleans and invalid values do not become trusted sequence numbers.
+    if type(order) is not int or order <= 0:
+        order = 0
+    return row['date'], order, row['record_id']
+
+
 def target_for(employee, profiles):
     goal = employee.get('career_goal')
     role = goal['target_role'] if goal else employee['role']
@@ -24,7 +33,7 @@ def apply_gain(levels, event):
 def current_skills(employee, history, events, today):
     levels = dict(employee['skills'])
     seen = set()
-    for row in sorted(history, key=lambda r: (r['date'], r['record_id'])):
+    for row in sorted(history, key=history_sort_key):
         if row['employee_id'] != employee['employee_id'] or row['status'] != 'completed':
             continue
         eid = row['event_id']
@@ -61,7 +70,7 @@ def eligible(event, employee, levels, history, today):
 
 
 def recommend(employee, history, events, skills, profiles, today):
-    personal = sorted((r for r in history if r['employee_id'] == employee['employee_id'] and r['date'] <= today), key=lambda r: (r['date'], r['record_id']))
+    personal = sorted((r for r in history if r['employee_id'] == employee['employee_id'] and r['date'] <= today), key=history_sort_key)
     levels = current_skills(employee, personal, events, today)
     target = target_for(employee, profiles)
     candidates = []

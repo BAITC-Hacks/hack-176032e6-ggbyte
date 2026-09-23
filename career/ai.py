@@ -27,10 +27,13 @@ def configuration():
     provider = os.environ.get('AI_PROVIDER', 'none').lower()
     models = {'openai': os.environ.get('OPENAI_MODEL', 'gpt-4.1-mini'),
               'nvidia': os.environ.get('NVIDIA_MODEL', 'meta/llama-3.1-8b-instruct'),
-              'ollama': os.environ.get('OLLAMA_MODEL', 'qwen3:1.7b')}
+              'ollama': os.environ.get('OLLAMA_MODEL', 'qwen2.5:1.5b')}
     key = os.environ.get('OPENAI_API_KEY' if provider == 'openai' else 'NVIDIA_API_KEY', '')
-    enabled = provider in models and (provider == 'ollama' or (os.environ.get('CQ_ALLOW_CLOUD_DATA') == 'true' and bool(key and not key.startswith('YOUR_'))))
-    return {'provider': provider, 'model': models.get(provider, ''), 'configured': enabled}
+    has_key = bool(key and not key.startswith('YOUR_'))
+    cloud_allowed = os.environ.get('CQ_ALLOW_CLOUD_DATA') == 'true'
+    enabled = provider in models and (provider == 'ollama' or (cloud_allowed and has_key))
+    return {'provider': provider, 'model': models.get(provider, ''), 'configured': enabled,
+            'key_configured': has_key if provider in ('openai', 'nvidia') else False, 'cloud_allowed': cloud_allowed}
 
 
 def request_model(config, context):
@@ -56,7 +59,7 @@ def request_model(config, context):
     else:
         url = 'http://127.0.0.1:11434/api/generate'
         payload = {'model': model, 'system': system, 'prompt': text, 'stream': False, 'format': schema,
-                   'think': False, 'options': {'temperature': 0, 'num_predict': 200}}
+                   'keep_alive': '30m', 'options': {'temperature': 0, 'num_predict': 100, 'num_ctx': 4096}}
     request = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers)
     with urllib.request.urlopen(request, timeout=7) as response:
         raw = json.loads(response.read(100_000))
@@ -72,13 +75,8 @@ def request_model(config, context):
     return json.loads(output)['event_ids']
 
 
-def rerank(result):
-    config = configuration()
-    if not config['configured']:
-        return {'mode': 'rules', 'message': 'LLM не подключена. Показан объяснимый многофакторный подбор.', 'ids': []}
+def anonymous_context(result):
     candidates = result['candidates'][:8]
-    if not candidates:
-        return {'mode': 'rules', 'message': result['empty_reason'], 'ids': []}
     # No names, employee IDs, original event IDs, dates, or raw history leave the server.
     mapping = {f'C{i + 1}': c['event_id'] for i, c in enumerate(candidates)}
     context = {'current_grade': result['employee']['grade'], 'target_grade': result['target']['grade'],
@@ -86,6 +84,18 @@ def rerank(result):
                'candidates': [{'id': f'C{i + 1}', 'score': c['score'], 'type': c['type'], 'format': c['format'],
                                'hours': c['duration_hours'], 'gains': [{k: g[k] for k in ('name', 'before', 'after', 'required', 'critical')} for g in c['gains']],
                                'participation': c['participation'], 'in_progress': c['in_progress'], 'unlocks_count': len(c['unlocks'])} for i, c in enumerate(candidates)]}
+    return mapping, context
+
+
+def rerank(result):
+    config = configuration()
+    if not config['configured']:
+        if config.get('key_configured') and not config.get('cloud_allowed'):
+            return {'mode': 'rules', 'message': 'OpenAI/NVIDIA настроен, но внешняя обработка данных выключена. Показан многофакторный подбор.', 'ids': []}
+        return {'mode': 'rules', 'message': 'LLM не подключена. Показан объяснимый многофакторный подбор.', 'ids': []}
+    if not result['candidates']:
+        return {'mode': 'rules', 'message': result['empty_reason'], 'ids': []}
+    mapping, context = anonymous_context(result)
     cache_key = hashlib.sha256(json.dumps([config, context], sort_keys=True).encode()).hexdigest()
     cached = CACHE.get(cache_key)
     if cached and cached[0] > time.time() - 600:

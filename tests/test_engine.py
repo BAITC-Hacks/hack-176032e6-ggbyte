@@ -66,6 +66,19 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(len(reopened.employees), 4)
             reopened.db.close()
 
+    def test_imported_history_updates_new_profile_skills(self):
+        with tempfile.TemporaryDirectory() as path:
+            write(path); store = Store(path)
+            new = copy.deepcopy(self.employee); new['employee_id'] = 'JURY_HISTORY'
+            history_csv = ('record_id,employee_id,event_id,date,due_date,status,completion_pct,score,feedback_rating,assigned_by\n'
+                           'JH1,JURY_HISTORY,DEMO_DESIGN,2026-09-20,,completed,100,90,5,self\n')
+            imported = store.merge(json.dumps([new]), history_csv)
+            self.assertEqual(imported, {'profiles': 1, 'records': 1})
+            result = recommend(new, store.history, store.events, store.skills, store.profiles, store.today)
+            self.assertEqual(result['skills']['DESIGN'], 4)
+            self.assertNotIn('DEMO_DESIGN', [r['event_id'] for r in result['recommendations']])
+            store.db.close()
+
     def test_empty_recommendations_when_goal_is_satisfied(self):
         self.employee['skills'] = {'DESIGN': 5, 'CODE': 5, 'SPEAK': 5}
         result = self.run_recommend()

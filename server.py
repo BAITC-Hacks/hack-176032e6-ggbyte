@@ -151,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
             eid = data.get('employee_id', '')
             expected = os.environ.get('CQ_HR_PASSWORD', 'hr-quest-demo') if role == 'hr' else STORE.password_for(eid)
             valid_id = role == 'hr' or any(e['employee_id'] == eid for e in STORE.employees)
-            if role not in ('employee', 'hr') or not valid_id or not hmac.compare_digest(str(data.get('password', '')), expected):
+            if role not in ('employee', 'hr') or not valid_id or not hmac.compare_digest(str(data.get('password', '')).encode(), expected.encode()):
                 return self.send_json({'error': 'Неверный ID или пароль.'}, 401)
             token = secrets.token_urlsafe(32)
             session = {'role': role, 'employee_id': eid if role == 'employee' else STORE.employees[0]['employee_id'], 'expires': now + 8 * 3600}

@@ -81,6 +81,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.call('/.env')[0], 404)
         self.assertEqual(self.call('/data/employees.json')[0], 404)
 
+    def test_untrusted_host_is_rejected(self):
+        request = urllib.request.Request(self.url + '/api/health', headers={'Host': 'attacker.example'})
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.client.open(request)
+        self.assertEqual(error.exception.code, 403)
+
     def test_cloud_requires_explicit_opt_in(self):
         from career.ai import configuration
         with patch.dict('os.environ', {'AI_PROVIDER': 'openai', 'OPENAI_API_KEY': 'test-key', 'CQ_ALLOW_CLOUD_DATA': 'false'}):

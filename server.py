@@ -44,6 +44,9 @@ def public_profile(result):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def valid_host(self):
+        return self.headers.get('Host') in {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}
+
     def log_message(self, fmt, *args):
         pass
 
@@ -70,6 +73,8 @@ class Handler(BaseHTTPRequestHandler):
         return session if session and session['expires'] > time.time() else None
 
     def do_GET(self):
+        if not self.valid_host():
+            return self.send_json({'error': 'Недопустимый адрес сервера.'}, 403)
         path = urlparse(self.path).path
         if path == '/api/health':
             return self.send_json({'ok': True})
@@ -117,6 +122,8 @@ class Handler(BaseHTTPRequestHandler):
                             'missed': c['no_show'] + c['declined'] + c['dropped']} for eid, c in sorted(counts.items())], 'today': STORE.today}
 
     def do_POST(self):
+        if not self.valid_host():
+            return self.send_json({'error': 'Недопустимый адрес сервера.'}, 403)
         origin = self.headers.get('Origin')
         if origin and origin != 'http://' + self.headers.get('Host', ''):
             return self.send_json({'error': 'Недопустимый источник запроса.'}, 403)

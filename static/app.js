@@ -5,6 +5,7 @@ const state = {
   hr: null,
   view: "home",
   ai: null,
+  health: null,
   request: 0,
 };
 const esc = (v) =>
@@ -76,6 +77,58 @@ async function api(path, data) {
   return result;
 }
 let toastTimer;
+function isDemo() {
+  return (state.profile?.data_mode || state.health?.mode) === "independent_demo";
+}
+function aiSetupHint(config) {
+  if (!config || config.configured) return "";
+  if (!config.provider || config.provider === "none")
+    return "Для модели укажите AI_PROVIDER=openai и OPENAI_API_KEY в локальном файле .env, затем перезапустите приложение.";
+  if (["openai", "nvidia"].includes(config.provider) && !config.key_configured)
+    return `Добавьте ${config.provider === "openai" ? "OPENAI_API_KEY" : "NVIDIA_API_KEY"} в локальный файл .env и перезапустите приложение. Ключ остаётся на сервере.`;
+  if (!config.cloud_allowed && !config.demo_data_allowed)
+    return isDemo()
+      ? "В этот профиль импортированы данные. Для них внешняя обработка выключена. Проверить модель можно на исходном демопрофиле E0001 после сброса сценария."
+      : "Внешняя обработка данных датасета выключена. Чтобы проверить модель на независимых примерах, запустите: python run.py --demo-ai.";
+  return "Проверьте настройки AI_PROVIDER и модели в файле .env, затем перезапустите приложение.";
+}
+function dataModeBanner() {
+  if (!isDemo()) return "";
+  return `<aside class="data-mode"><span class="mode-symbol" aria-hidden="true">✧</span><div><strong>Независимые демоданные · AI</strong><p>Отдельный сценарий для проверки модели и прогресса. Импортированные профили не получают разрешение на облачную обработку автоматически.</p></div></aside>`;
+}
+function aiStatus() {
+  const answer = state.ai;
+  const config = state.profile.ai;
+  const label = answer?.mode === "llm" ? "Модель выбрала шаги" : answer ? "Подбор по правилам" : config.configured ? "Ожидаем ответ модели" : "Подбор по правилам";
+  const message = answer?.message || (config.configured
+    ? `${config.provider} · ${config.model}: отправляем признаки для выбора следующего шага…`
+    : "Рекомендации рассчитаны по навыкам, карьерной цели и истории участия.");
+  const timing = answer?.cached ? " · сохранённый ответ модели" : answer?.latency_ms ? ` · ${(answer.latency_ms / 1000).toFixed(1)} с` : "";
+  const hint = aiSetupHint(config);
+  return `<div class="ai-status-title"><span class="tag ${answer?.mode === "llm" ? "" : "neutral"}">${label}</span></div><p>${esc(message + timing)}</p>${hint ? `<p class="ai-setup-hint">${esc(hint)}</p>` : ""}`;
+}
+function demoResetControl() {
+  if (!isDemo() || state.profile.employee.employee_id !== "E0001") return "";
+  return `<details class="demo-reset"><summary>Повторить демосценарий</summary><p>Сброс восстановит исходные навыки, цель и историю только демосотрудника E0001. Его прогресс вернётся к 50%; добавленные для него завершения и импортированные изменения будут удалены.</p><button class="btn secondary" id="reset-demo" type="button">Сбросить демопрофиль E0001</button></details>`;
+}
+function bindDemoReset() {
+  const button = document.getElementById("reset-demo");
+  if (!button) return;
+  button.onclick = async () => {
+    button.disabled = true;
+    state.request++;
+    try {
+      state.profile = await api("/demo/reset", { employee_id: "E0001" });
+      state.ai = null;
+      render();
+      toast("Демосценарий E0001 восстановлен. Прогресс — 50%.");
+      refreshAI();
+    } catch (error) {
+      toast(error.message);
+      button.disabled = false;
+    }
+  };
+}
 function toast(message) {
   const el = document.getElementById("toast");
   el.textContent = message;
@@ -84,7 +137,7 @@ function toast(message) {
   toastTimer = setTimeout(() => (el.style.display = "none"), 5500);
 }
 function renderLogin() {
-  app.innerHTML = `<main class="login"><section class="login-story"><div class="brand"><img src="/favicon.svg" alt=""><div>Career Quest<small>ТВОЯ ТРАЕКТОРИЯ</small></div></div><div><div class="eyebrow">РАЗВИТИЕ СО СМЫСЛОМ</div><h1>Следующий шаг.<br><em>Твоя следующая версия.</em></h1><p>Соедини навыки, обучение и карьерную цель в понятный маршрут.</p><div class="login-steps"><div><b>01</b>Выбери цель</div><div><b>02</b>Найди свой шаг</div><div><b>03</b>Увидь прогресс</div></div></div><small>Career Quest · HackAlem AI · Halyk Bank track</small></section><section class="login-form"><form id="login"><h2>Начнём с тебя</h2><p class="muted intro">Войди в свой кабинет развития.</p><label class="field">Режим<select name="role" id="login-role"><option value="employee">Сотрудник</option><option value="hr">HR-специалист</option></select></label><label class="field" id="employee-field">ID сотрудника<input name="employee_id" value="E0001" autocomplete="username" required></label><label class="field">Пароль<input name="password" type="password" autocomplete="current-password" required placeholder="Введи пароль"></label><button class="btn" type="submit">Войти в Career Quest <span aria-hidden="true">↗</span></button><p id="login-error" class="error" role="alert"></p><div class="demo-hint">Демонстрационные доступы:<br>Сотрудник: <b>E0001</b> / <b>quest-demo</b><br>HR: <b>hr-quest-demo</b><br>Используются синтетические данные.</div></form></section></main>`;
+  app.innerHTML = `<main class="login"><section class="login-story"><div class="brand"><img src="/favicon.svg" alt=""><div>Career Quest<small>ТВОЯ ТРАЕКТОРИЯ</small></div></div><div><div class="eyebrow">РАЗВИТИЕ СО СМЫСЛОМ</div><h1>Следующий шаг.<br><em>Твоя следующая версия.</em></h1><p>Соедини навыки, обучение и карьерную цель в понятный маршрут.</p><div class="login-steps"><div><b>01</b>Выбери цель</div><div><b>02</b>Найди свой шаг</div><div><b>03</b>Увидь прогресс</div></div></div><small>Career Quest · HackAlem AI · Halyk Bank track</small></section><section class="login-form"><form id="login"><h2>Начнём с тебя</h2><p class="muted intro">Войди в свой кабинет развития.</p>${isDemo() ? '<div class="login-mode"><strong>Независимые демоданные · AI</strong><p>Проверь выбор модели и изменение навыков на отдельном примере.</p></div>' : ""}${state.health?.ai && !state.health.ai.configured ? `<p class="login-ai-hint">${esc(aiSetupHint(state.health.ai))}</p>` : ""}<label class="field">Режим<select name="role" id="login-role"><option value="employee">Сотрудник</option><option value="hr">HR-специалист</option></select></label><label class="field" id="employee-field">ID сотрудника<input name="employee_id" value="E0001" autocomplete="username" required></label><label class="field">Пароль<input name="password" type="password" autocomplete="current-password" required placeholder="Введи пароль"></label><button class="btn" type="submit">Войти в Career Quest <span aria-hidden="true">↗</span></button><p id="login-error" class="error" role="alert"></p><div class="demo-hint">Демонстрационные доступы:<br>Сотрудник: <b>E0001</b> / <b>quest-demo</b><br>HR: <b>hr-quest-demo</b><br>Используются синтетические данные.</div></form></section></main>`;
   document.getElementById("login-role").onchange = (e) => {
     document.getElementById("employee-field").hidden = e.target.value === "hr";
   };
@@ -126,7 +179,7 @@ function shell(body) {
             .slice(0, 2)
             .join(""),
         )
-  }</span><span class="account-name">${isHR ? "HR-кабинет" : esc(e?.full_name)}</span><button class="logout" id="logout">Выйти</button></div></header><main class="page">${body}</main></div></div>`;
+  }</span><span class="account-name">${isHR ? "HR-кабинет" : esc(e?.full_name)}</span><button class="logout" id="logout">Выйти</button></div></header><main class="page">${dataModeBanner()}${body}</main></div></div>`;
   document
     .querySelectorAll("[data-view]")
     .forEach((b) => (b.onclick = () => navigate(b.dataset.view)));
@@ -208,7 +261,7 @@ function renderHome() {
   const done = p.history.filter((r) => r.status === "completed");
   const closed = p.gaps.filter((g) => g.current >= g.required).length;
   shell(
-    `${heading(`Твоя следующая глава`, `${esc(e.full_name)} · ${esc(e.role)} · ${esc(e.grade)}`)}<section class="hero"><div><div class="eyebrow">ТВОЙ КАРЬЕРНЫЙ МАРШРУТ</div><h2>${esc(p.target.role)} <span style="color:var(--lime)">${esc(p.target.grade)}</span></h2><p>Сделай рост видимым: развивай навыки, которые нужны для твоей цели, и двигайся в удобном темпе.</p><div class="hero-actions"><button class="btn light" id="show-skills">Посмотреть маршрут ↗</button><span class="tag">${p.critical_ready ? "Ключевые навыки готовы" : "Фокус на ключевых навыках"}</span></div></div><div class="progress-ring" style="--progress:${p.progress}" role="img" aria-label="${p.progress}% требований цели"><div><b>${p.progress}%</b><span>к карьерной цели</span></div></div></section>${stats(
+    `${heading(`Твоя следующая глава`, `${esc(e.full_name)} · ${esc(e.role)} · ${esc(e.grade)}`)}<section class="hero"><div><div class="eyebrow">ТВОЙ КАРЬЕРНЫЙ МАРШРУТ</div><h2>${esc(p.target.role)} <span style="color:var(--lime)">${esc(p.target.grade)}</span></h2><p>Сделай рост видимым: развивай навыки, которые нужны для твоей цели, и двигайся в удобном темпе.</p><div class="hero-actions"><button class="btn light" id="show-ai">Открыть AI-навигатор ✧</button><span class="tag">${p.critical_ready ? "Ключевые навыки готовы" : "Фокус на ключевых навыках"}</span></div></div><div class="progress-ring" style="--progress:${p.progress}" role="img" aria-label="${p.progress}% требований цели"><div><b>${p.progress}%</b><span>к карьерной цели</span></div></div></section>${stats(
       [
         [
           `${closed}<small class="muted"> / ${p.gaps.length}</small>`,
@@ -222,7 +275,7 @@ function renderHome() {
           "↗",
         ],
       ],
-    )}<section><div class="section-head"><div><h2>AI-навигатор: следующий шаг</h2><p>При подключении модель выбирает до трёх активностей по разрывам навыков и истории участия. Решение об участии — за вами.</p></div><button class="btn secondary" id="refresh-ai">✧ Обновить подбор</button></div><div id="ai-state" class="ai-state" role="status">${esc(state.ai?.message || (p.ai.configured ? "Модель подключена. Подбираем шаги…" : "Многофакторный подбор · LLM пока не подключена"))}</div><div id="quests">${quests()}</div></section><div class="lower-grid"><section class="panel"><div class="section-head"><h2>Навыки в фокусе</h2><button class="btn text" id="all-skills">Все навыки ↗</button></div><p class="sub">Текущий уровень / требования ${esc(p.target.grade)}</p>${skillRows(p.gaps.filter((g) => g.current < g.required).slice(0, 5)) || '<p class="notice">Все требования выбранной цели выполнены.</p>'}</section><section class="panel"><div class="section-head"><h2>Твой путь уже начался</h2></div><p class="sub">Последние завершённые активности</p><div class="timeline">${
+    )}<section id="ai-navigator" aria-labelledby="ai-heading"><div class="section-head"><div><h2 id="ai-heading" tabindex="-1">AI-навигатор: следующий шаг</h2><p>Модель выбирает до трёх доступных активностей с учётом карьерной цели, разрывов навыков и истории участия. Обоснование и прогноз прогресса проверяет система.</p></div><button class="btn secondary" id="refresh-ai">✧ Обновить подбор</button></div><div id="ai-state" class="ai-state" role="status">${aiStatus()}</div><div id="quests">${quests()}</div>${demoResetControl()}</section><div class="lower-grid"><section class="panel"><div class="section-head"><h2>Навыки в фокусе</h2><button class="btn text" id="all-skills">Все навыки ↗</button></div><p class="sub">Текущий уровень / требования ${esc(p.target.grade)}</p>${skillRows(p.gaps.filter((g) => g.current < g.required).slice(0, 5)) || '<p class="notice">Все требования выбранной цели выполнены.</p>'}</section><section class="panel"><div class="section-head"><h2>Твой путь уже начался</h2></div><p class="sub">Последние завершённые активности</p><div class="timeline">${
       done
         .slice(0, 4)
         .map(
@@ -233,12 +286,15 @@ function renderHome() {
       '<div class="empty">Здесь появятся первые завершённые шаги.</div>'
     }</div><button class="btn text" id="all-history">Вся история ↗</button></section></div><p class="footer-note">Прогресс показывает соответствие навыков выбранной цели. Решение о повышении принимает руководитель после оценки.</p>`,
   );
-  document.getElementById("show-skills").onclick = document.getElementById(
-    "all-skills",
-  ).onclick = () => navigate("skills");
+  document.getElementById("show-ai").onclick = () => {
+    document.getElementById("ai-navigator").scrollIntoView({ block: "start" });
+    document.getElementById("ai-heading").focus({ preventScroll: true });
+  };
+  document.getElementById("all-skills").onclick = () => navigate("skills");
   document.getElementById("all-history").onclick = () => navigate("history");
   document.getElementById("refresh-ai").onclick = () => refreshAI();
   bindCompletions();
+  bindDemoReset();
 }
 async function refreshAI() {
   const request = ++state.request;
@@ -247,6 +303,10 @@ async function refreshAI() {
   if (button) {
     button.disabled = true;
     button.textContent = "Подбираем…";
+  }
+  const status = document.getElementById("ai-state");
+  if (status && state.profile.ai.configured) {
+    status.innerHTML = `<div class="ai-status-title"><span class="tag neutral">Запрос к модели</span></div><p>${esc(state.profile.ai.provider)} · ${esc(state.profile.ai.model)}: выбираем следующий шаг…</p>`;
   }
   try {
     const answer = await api("/ai", { employee_id: eid });
@@ -258,16 +318,21 @@ async function refreshAI() {
       return;
     state.ai = answer;
     if (state.view === "home") {
-      document.getElementById("ai-state").textContent =
-        answer.message +
-        (answer.latency_ms
-          ? ` · ${(answer.latency_ms / 1000).toFixed(1)} с`
-          : "");
+      document.getElementById("ai-state").innerHTML = aiStatus();
       document.getElementById("quests").innerHTML = quests();
       bindCompletions();
     }
   } catch (error) {
-    if (request === state.request) toast(error.message);
+    if (request === state.request) {
+      state.ai = { mode: "rules", message: `Не удалось получить ответ AI: ${error.message}. Показан подбор по правилам.` };
+      const currentStatus = document.getElementById("ai-state");
+      if (currentStatus) {
+        currentStatus.innerHTML = aiStatus();
+        document.getElementById("quests").innerHTML = quests();
+        bindCompletions();
+      }
+      toast(error.message);
+    }
   } finally {
     if (request === state.request && button?.isConnected) {
       button.disabled = false;
@@ -500,6 +565,7 @@ async function navigate(view) {
 }
 async function boot() {
   try {
+    state.health = await api("/health");
     state.session = await api("/session");
     state.profile = await api("/profile");
     state.ai = null;

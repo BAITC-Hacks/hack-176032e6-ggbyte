@@ -23,7 +23,7 @@ def load_env(root):
                     os.environ.setdefault(key.strip(), value.strip().strip('\"\''))
 
 
-def configuration():
+def configuration(*, independent_demo=False):
     provider = os.environ.get('AI_PROVIDER', 'none').lower()
     models = {'openai': os.environ.get('OPENAI_MODEL', 'gpt-4.1-mini'),
               'nvidia': os.environ.get('NVIDIA_MODEL', 'meta/llama-3.1-8b-instruct'),
@@ -31,9 +31,10 @@ def configuration():
     key = os.environ.get('OPENAI_API_KEY' if provider == 'openai' else 'NVIDIA_API_KEY', '')
     has_key = bool(key and not key.startswith('YOUR_'))
     cloud_allowed = os.environ.get('CQ_ALLOW_CLOUD_DATA') == 'true'
-    enabled = provider in models and (provider == 'ollama' or (cloud_allowed and has_key))
+    enabled = provider in models and (provider == 'ollama' or ((cloud_allowed or independent_demo) and has_key))
     return {'provider': provider, 'model': models.get(provider, ''), 'configured': enabled,
-            'key_configured': has_key if provider in ('openai', 'nvidia') else False, 'cloud_allowed': cloud_allowed}
+            'key_configured': has_key if provider in ('openai', 'nvidia') else False,
+            'cloud_allowed': cloud_allowed, 'demo_data_allowed': independent_demo}
 
 
 def request_model(config, context):
@@ -87,11 +88,14 @@ def anonymous_context(result):
     return mapping, context
 
 
-def rerank(result):
-    config = configuration()
+def rerank(result, config=None):
+    config = config if config is not None else configuration()
     if not config['configured']:
-        if config.get('key_configured') and not config.get('cloud_allowed'):
+        if config.get('key_configured') and not (config.get('cloud_allowed') or config.get('demo_data_allowed')):
             return {'mode': 'rules', 'message': 'OpenAI/NVIDIA настроен, но внешняя обработка данных выключена. Показан многофакторный подбор.', 'ids': []}
+        if config['provider'] in ('openai', 'nvidia') and not config.get('key_configured'):
+            key_name = 'OPENAI_API_KEY' if config['provider'] == 'openai' else 'NVIDIA_API_KEY'
+            return {'mode': 'rules', 'message': f'Не задан {key_name}. Добавьте ключ в .env и перезапустите сервер. Пока используется многофакторный подбор.', 'ids': []}
         return {'mode': 'rules', 'message': 'LLM не подключена. Показан объяснимый многофакторный подбор.', 'ids': []}
     if not result['candidates']:
         return {'mode': 'rules', 'message': result['empty_reason'], 'ids': []}
@@ -116,5 +120,16 @@ def rerank(result):
         return answer
     except Exception as exc:
         future.cancel()
-        hint = 'Проверьте ключ и доступ к модели.' if isinstance(exc, urllib.error.HTTPError) and exc.code in (401, 403, 404) else 'Проверьте подключение и настройки модели.'
-        return {'mode': 'fallback', 'message': f'AI не ответил вовремя или вернул неверный результат. {hint} Показан многофакторный подбор.', 'ids': []}
+        if isinstance(exc, urllib.error.HTTPError):
+            code = exc.code
+            hints = {401: 'API-ключ отклонён. Проверьте ключ в .env и перезапустите сервер.',
+                     403: 'У ключа нет доступа к API. Проверьте права проекта и доступность сервиса.',
+                     404: 'Модель недоступна. Проверьте название модели в .env.',
+                     429: 'Достигнут лимит API. Проверьте баланс и квоту сервиса, затем повторите подбор.'}
+            hint = hints.get(code, f'Сервис модели вернул HTTP {code}. Повторите подбор позже.')
+        elif isinstance(exc, (TimeoutError, urllib.error.URLError)):
+            hint = 'Нет ответа от модели за отведённое время. Проверьте интернет или запуск локальной модели и повторите подбор.'
+        else:
+            hint = 'Модель вернула неподходящий результат. Повторите подбор.'
+        return {'mode': 'fallback', 'message': f'{hint} Показан многофакторный подбор.', 'ids': [],
+                'latency_ms': round((time.monotonic() - started) * 1000)}

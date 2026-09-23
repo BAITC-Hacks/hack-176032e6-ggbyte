@@ -33,6 +33,10 @@ def profile(eid):
     return recommend(employee, STORE.history, STORE.events, STORE.skills, STORE.profiles, STORE.today)
 
 
+def ai_configuration(eid):
+    return configuration(independent_demo=STORE.demo_data_allowed(eid))
+
+
 def public_profile(result):
     result = dict(result)
     result.pop('candidates', None)
@@ -45,11 +49,16 @@ def public_profile(result):
          'required': result['target']['required_skills'].get(sid)}
         for sid, level in sorted(result['skills'].items(), key=lambda item: STORE.skills[item[0]]['name'])
     ]
-    result['ai'] = configuration()
+    result['ai'] = ai_configuration(result['employee']['employee_id'])
+    result['data_mode'] = 'independent_demo' if STORE.independent_demo else 'dataset'
     return result
 
 
 class Handler(BaseHTTPRequestHandler):
+    def session_cookie_name(self):
+        # Browsers share cookies between localhost ports. Keep main/demo logins separate.
+        return f'cq_session_{self.server.server_port}'
+
     def valid_host(self):
         return self.headers.get('Host') in {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}
 
@@ -72,7 +81,8 @@ class Handler(BaseHTTPRequestHandler):
         cookie = SimpleCookie()
         try:
             cookie.load(self.headers.get('Cookie', ''))
-            token = cookie['cq_session'].value if 'cq_session' in cookie else ''
+            name = self.session_cookie_name()
+            token = cookie[name].value if name in cookie else ''
         except Exception:
             token = ''
         session = SESSIONS.get(token)
@@ -83,7 +93,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({'error': 'Недопустимый адрес сервера.'}, 403)
         path = urlparse(self.path).path
         if path == '/api/health':
-            return self.send_json({'ok': True})
+            with LOCK:
+                return self.send_json({'ok': True, 'mode': 'independent_demo' if STORE.independent_demo else 'dataset',
+                                       'ai': ai_configuration('E0001')})
         if not path.startswith('/api/'):
             return self.static(path)
         with LOCK:
@@ -130,22 +142,29 @@ class Handler(BaseHTTPRequestHandler):
                             'missed': c['no_show'] + c['declined'] + c['dropped']} for eid, c in sorted(counts.items())], 'today': STORE.today}
 
     def do_POST(self):
-        if not self.valid_host():
-            return self.send_json({'error': 'Недопустимый адрес сервера.'}, 403)
-        origin = self.headers.get('Origin')
-        if origin and origin != 'http://' + self.headers.get('Host', ''):
-            return self.send_json({'error': 'Недопустимый источник запроса.'}, 403)
         try:
             size = int(self.headers.get('Content-Length', '0'))
             if size > 5_000_000 or size < 0:
                 return self.send_json({'error': 'Лимит загрузки — 5 МБ.'}, 413)
-            data = json.loads(self.rfile.read(size) or b'{}')
+            # Consume the bounded body before an early 403. Closing a socket with
+            # unread request bytes can reset the connection on Windows and hide
+            # the JSON error from the browser. No parsing or mutation happens yet.
+            self.connection.settimeout(5)
+            body = self.rfile.read(size)
+            if not self.valid_host():
+                return self.send_json({'error': 'Недопустимый адрес сервера.'}, 403)
+            origin = self.headers.get('Origin')
+            if origin and origin != 'http://' + self.headers.get('Host', ''):
+                return self.send_json({'error': 'Недопустимый источник запроса.'}, 403)
+            data = json.loads(body or b'{}')
             if not isinstance(data, dict):
                 raise ValueError('Ожидается JSON-объект.')
             with LOCK:
                 return self.post_action(urlparse(self.path).path, data)
         except (ValueError, KeyError, TypeError) as exc:
             return self.send_json({'error': 'Некорректные данные: ' + str(exc)}, 400)
+        except TimeoutError:
+            return self.send_json({'error': 'Загрузка запроса заняла слишком много времени.'}, 408)
 
     def post_action(self, path, data):
         if path == '/api/login':
@@ -164,15 +183,16 @@ class Handler(BaseHTTPRequestHandler):
             token = secrets.token_urlsafe(32)
             session = {'role': role, 'employee_id': eid if role == 'employee' else STORE.employees[0]['employee_id'], 'expires': now + 8 * 3600}
             SESSIONS[token] = session
-            return self.send_json({'role': role}, cookie=f'cq_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800')
+            return self.send_json({'role': role}, cookie=f'{self.session_cookie_name()}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800')
         session = self.session()
         if not session:
             return self.send_json({'error': 'Войдите в приложение.'}, 401)
         if path == '/api/logout':
             cookie = SimpleCookie(self.headers.get('Cookie', ''))
-            if 'cq_session' in cookie:
-                SESSIONS.pop(cookie['cq_session'].value, None)
-            return self.send_json({'ok': True}, cookie='cq_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
+            name = self.session_cookie_name()
+            if name in cookie:
+                SESSIONS.pop(cookie[name].value, None)
+            return self.send_json({'ok': True}, cookie=f'{name}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
         if path == '/api/import':
             if session['role'] != 'hr':
                 return self.send_json({'error': 'Импорт доступен только HR.'}, 403)
@@ -181,11 +201,15 @@ class Handler(BaseHTTPRequestHandler):
         if session['role'] != 'hr' and eid != session['employee_id']:
             return self.send_json({'error': 'Нет доступа к чужому профилю.'}, 403)
         result = profile(eid)
+        if path == '/api/demo/reset':
+            STORE.reset_demo_employee(eid)
+            return self.send_json(public_profile(profile(eid)))
         if path == '/api/ai':
+            config = ai_configuration(eid)
             # Do not block other UI requests while waiting for a model.
             LOCK.release()
             try:
-                ai = rerank(result)
+                ai = rerank(result, config=config)
             finally:
                 LOCK.acquire()
             choices = {c['event_id']: c for c in result['candidates']}
@@ -227,23 +251,61 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def main():
+def main(argv=None, *, bootstrap=False):
     global STORE
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=8000)
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(description='Career Quest — local career navigator')
+    parser.add_argument('--port', type=int, help='Default: 8001 for AI demo, 8000 for dataset')
+    parser.add_argument('--demo-ai', action='store_true', help='Use isolated independent fixtures with AI in runtime/ai-demo')
+    parser.add_argument('--dataset', help='Import organizer ZIP into the main data folder')
+    parser.add_argument('--open-browser', action='store_true', help='Open the local app in your default browser')
+    args = parser.parse_args(argv)
+    if args.demo_ai and args.dataset:
+        parser.error('--demo-ai and --dataset are separate data modes; choose one.')
+    port = args.port if args.port is not None else (8001 if args.demo_ai else 8000)
+    if not 1 <= port <= 65535:
+        parser.error('--port must be between 1 and 65535.')
+    root = ROOT
+    if args.demo_ai:
+        root = ROOT / 'runtime' / 'ai-demo'
+        root.mkdir(parents=True, exist_ok=True)
+        from examples.demo import write
+        # Catalogs and seed data always come from our source-controlled fixtures.
+        # SQLite progress and import provenance persist separately in this folder.
+        write(root)
+    elif args.dataset:
+        from scripts.import_dataset import extract
+        extract(args.dataset)
+    elif bootstrap and not (ROOT / 'data' / 'employees.json').exists():
+        from examples.demo import write
+        write(ROOT)
+        print('Using independent demo fixtures. For a working AI demo: python run.py --demo-ai')
     try:
-        STORE = Store(ROOT)
+        STORE = Store(root, independent_demo=args.demo_ai)
     except FileNotFoundError:
         print('Dataset missing. Run: python scripts/import_dataset.py <path-to-career_quest_dataset.zip>')
         raise SystemExit(1)
-    server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
-    print(f'Career Quest: http://127.0.0.1:{args.port}', flush=True)
+    try:
+        server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    except OSError:
+        STORE.db.close()
+        print(f'Cannot start on port {port}. Another server may be running. Open http://127.0.0.1:{port} or use --port {port + 1}.', flush=True)
+        raise SystemExit(1)
+    url = f'http://127.0.0.1:{port}'
+    print(f'Career Quest: {url}', flush=True)
+    print('Data mode: independent AI demo (runtime/ai-demo)' if args.demo_ai else 'Data mode: main dataset (data/)', flush=True)
+    config = ai_configuration('E0001')
+    print(f"AI: {config['provider']} / {config['model']} / {'configured; verified on first recommendation' if config['configured'] else 'disabled; check .env and README'}", flush=True)
     print('Demo employee: E0001 / quest-demo. HR: hr-quest-demo. Override passwords with CQ_EMPLOYEE_PASSWORD and CQ_HR_PASSWORD.', flush=True)
+    if args.open_browser:
+        import webbrowser
+        webbrowser.open(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        pass
+    finally:
         server.server_close()
+        STORE.db.close()
 
 
 if __name__ == '__main__':

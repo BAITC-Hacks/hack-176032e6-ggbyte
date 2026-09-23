@@ -1229,3 +1229,45 @@ td button {
 .import-text { margin: 16px 0; }
 .import-text textarea { display: block; width: 100%; min-width: 0; resize: vertical; padding: 12px; border: 1px solid var(--line); border-radius: 10px; font: 13px/1.5 monospace; }
 .import-text textarea:focus-visible { outline: 3px solid #22795c; outline-offset: 3px; }
+
+.data-mode {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 25px;
+  padding: 16px 18px;
+  border: 1px solid #cfdfbf;
+  border-radius: 14px;
+  background: #f1f7e8;
+  color: #365c3c;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.data-mode p { margin-top: 4px; }
+.mode-symbol { font-size: 24px; line-height: 1.15; }
+.login-mode {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #edf5e6;
+  color: #365c3c;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.login-mode p { margin-top: 5px; }
+.login-ai-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.ai-status-title { margin-bottom: 7px; }
+#ai-navigator { scroll-margin-top: 24px; }
+.ai-setup-hint { margin-top: 8px; overflow-wrap: anywhere; }
+.demo-reset {
+  margin-top: 16px;
+  max-width: 720px;
+  color: var(--muted);
+}
+.demo-reset summary { font-size: 13px; }
+.demo-reset .btn { margin-top: 12px; }

@@ -21,14 +21,13 @@ from examples.demo import write
 def main():
     # Only the API configuration is read from the project, never data/ or SQLite.
     load_env(ROOT)
-    config = configuration()
+    config = configuration(independent_demo=True)
     if config['provider'] not in ('openai', 'nvidia', 'ollama'):
         raise ValueError('Configure an AI provider first.')
     if config['provider'] != 'ollama' and not config['key_configured']:
         raise ValueError('API key is missing.')
     # This process serves ONLY independently authored temporary fixtures.
     # The application's .env and cloud-data setting are never changed.
-    os.environ['CQ_ALLOW_CLOUD_DATA'] = 'true'
     os.environ['CQ_EMPLOYEE_PASSWORD'] = 'workflow-demo-only'
     import server
 
@@ -36,7 +35,7 @@ def main():
     (ROOT / 'runtime').mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='ai-workflow-', dir=ROOT / 'runtime') as directory:
         write(directory)
-        server.STORE = Store(directory)
+        server.STORE = Store(directory, independent_demo=True)
         http_server = ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
         worker = threading.Thread(target=http_server.serve_forever, daemon=True)
         worker.start()
@@ -67,8 +66,11 @@ def main():
                 raise ValueError('Unexpected skill or progress after completion.')
             if call('/api/profile')['progress'] != 70:
                 raise ValueError('Progress did not persist.')
+            reset = call('/api/demo/reset', {'employee_id': 'E0001'})
+            if reset['progress'] != 50 or not reset['ai']['demo_data_allowed']:
+                raise ValueError('Demo reset did not restore the independent scenario.')
             call('/api/logout', {})
-            print(f"PASS: HTTP login -> {config['provider']} / {config['model']} -> validated recommendation -> completion -> saved progress 50% to 70%; AI {elapsed:.2f}s.")
+            print(f"PASS: HTTP login -> {config['provider']} / {config['model']} -> validated recommendation -> completion -> saved progress 50% to 70% -> reset 50%; AI {elapsed:.2f}s.")
         finally:
             http_server.shutdown()
             http_server.server_close()

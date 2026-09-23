@@ -54,8 +54,12 @@ def validate(employees, history, events, skill_ids, profiles):
 
 
 class Store:
-    def __init__(self, root):
+    def __init__(self, root, independent_demo=False):
         self.root = Path(root)
+        # Set only by the isolated launcher, never by uploaded JSON metadata.
+        self.independent_demo = independent_demo
+        from examples.demo import dataset
+        self.demo_employee_ids = {e['employee_id'] for e in dataset()['employees']['employees']}
         self.root.joinpath('runtime').mkdir(exist_ok=True)
         self.db = sqlite3.connect(self.root / 'runtime' / 'career.sqlite3', check_same_thread=False)
         self.db.execute('CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY, content TEXT NOT NULL)')
@@ -71,10 +75,13 @@ class Store:
         if row:
             saved = json.loads(row[0])
             self.employees, self.history = saved['employees'], saved['history']
+            # Legacy state has no provenance: fail closed instead of trusting IDs.
+            self.untrusted_employee_ids = set(saved.get('untrusted_employee_ids', [e['employee_id'] for e in self.employees]))
         else:
             self.employees = initial['employees']
             with (self.root / 'data' / 'activity_history.csv').open(encoding='utf-8-sig', newline='') as f:
                 self.history = list(csv.DictReader(f))
+            self.untrusted_employee_ids = set() if independent_demo else {e['employee_id'] for e in self.employees}
         validate(self.employees, self.history, self.events, self.skills, self.profiles)
         credentials_path = self.root / 'runtime' / 'employee-credentials.json'
         self.credentials = json.loads(credentials_path.read_text()) if credentials_path.exists() else {}
@@ -93,7 +100,26 @@ class Store:
 
     def save(self):
         with self.db:
-            self.db.execute('INSERT OR REPLACE INTO state VALUES (1,?)', (json.dumps({'employees': self.employees, 'history': self.history}, ensure_ascii=False),))
+            self.db.execute('INSERT OR REPLACE INTO state VALUES (1,?)', (json.dumps({'employees': self.employees, 'history': self.history,
+                            'untrusted_employee_ids': sorted(self.untrusted_employee_ids)}, ensure_ascii=False),))
+
+    def demo_data_allowed(self, eid):
+        return bool(self.independent_demo and eid in self.demo_employee_ids and eid not in self.untrusted_employee_ids)
+
+    def reset_demo_employee(self, eid):
+        if not self.independent_demo or eid != 'E0001':
+            raise ValueError('Сброс доступен только для E0001 в отдельном AI-демо.')
+        from examples.demo import dataset
+        fixtures = dataset()
+        original = next(e for e in fixtures['employees']['employees'] if e['employee_id'] == eid)
+        employees = [original if e['employee_id'] == eid else e for e in self.employees]
+        # New record IDs preserve any imported records belonging to other people.
+        history = [r for r in self.history if r['employee_id'] != eid]
+        history.extend({**r, 'record_id': 'RESET' + secrets.token_hex(12)} for r in fixtures['history'] if r['employee_id'] == eid)
+        validate(employees, history, self.events, self.skills, self.profiles)
+        self.employees, self.history = employees, history
+        self.untrusted_employee_ids.discard(eid)
+        self.save()
 
     def merge(self, profiles_json, history_csv):
         if not isinstance(profiles_json, str) or not isinstance(history_csv, str):
@@ -139,7 +165,11 @@ class Store:
         new_history.update({r['record_id']: r for r in records})
         employees, history = list(new_employees.values()), list(new_history.values())
         validate(employees, history, self.events, self.skills, self.profiles)
+        affected = {e['employee_id'] for e in incoming} | {r['employee_id'] for r in records}
+        replaced_ids = {r['record_id'] for r in records}
+        affected.update(r['employee_id'] for r in self.history if r['record_id'] in replaced_ids)
         self.employees, self.history = employees, history
+        self.untrusted_employee_ids.update(affected)
         self.ensure_credentials()
         self.save()
         return {'profiles': len(incoming), 'records': len(records)}

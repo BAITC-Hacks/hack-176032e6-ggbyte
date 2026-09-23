@@ -112,7 +112,9 @@ class Handler(BaseHTTPRequestHandler):
             recent_start = (date.fromisoformat(STORE.today) - timedelta(days=90)).isoformat()
             recent = [r for r in p['history'] if r['date'] >= recent_start and not STORE.events[r['event_id']]['mandatory']]
             employees.append({'employee_id': e['employee_id'], 'full_name': e['full_name'], 'role': e['role'], 'grade': e['grade'],
-                              'progress': p['progress'], 'has_step': bool(p['recommendations']), 'inactive': not any(r['status'] == 'completed' for r in recent)})
+                              'progress': p['progress'], 'has_step': bool(p['recommendations']),
+                              'goal_reached': all(g['current'] >= g['required'] for g in p['gaps']),
+                              'inactive': not any(r['status'] == 'completed' for r in recent)})
         counts = defaultdict(Counter)
         for row in STORE.history:
             if row['date'] <= STORE.today:

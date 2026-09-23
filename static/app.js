@@ -130,6 +130,13 @@ function shell(body) {
   document
     .querySelectorAll("[data-view]")
     .forEach((b) => (b.onclick = () => navigate(b.dataset.view)));
+  const navigation = document.querySelector(".nav");
+  const activeItem = navigation.querySelector('[aria-current="page"]');
+  if (activeItem && navigation.scrollWidth > navigation.clientWidth) {
+    navigation.scrollLeft += activeItem.getBoundingClientRect().left -
+      navigation.getBoundingClientRect().left -
+      (navigation.clientWidth - activeItem.clientWidth) / 2;
+  }
   document.getElementById("logout").onclick = async () => {
     await api("/logout", {});
     state.request++;
@@ -142,7 +149,7 @@ function heading(title, sub) {
   return `<div class="page-heading"><div><h1>${title}</h1><p>${sub}</p></div><span class="date-pill">Срез данных · ${date(state.profile?.today)}</span></div>`;
 }
 function stats(items) {
-  return `<div class="stats">${items.map(([number, label, symbol]) => `<div class="stat"><div class="stat-icon" aria-hidden="true">${symbol}</div><div><b>${number}</b><span>${label}</span></div></div>`).join("")}</div>`;
+  return `<div class="stats stats-${items.length}">${items.map(([number, label, symbol]) => `<div class="stat"><div class="stat-icon" aria-hidden="true">${symbol}</div><div><b>${number}</b><span>${label}</span></div></div>`).join("")}</div>`;
 }
 function skillRows(gaps) {
   return gaps
@@ -327,7 +334,7 @@ function renderHR() {
       [
         [count, "сотрудников в обзоре", "◇"],
         [
-          h.employees.filter((e) => !e.has_step).length,
+          h.employees.filter((e) => !e.has_step && !e.goal_reached).length,
           "без доступного шага",
           "↗",
         ],
@@ -336,6 +343,7 @@ function renderHR() {
           "без завершений за 90 дней",
           "◷",
         ],
+        [h.employees.filter((e) => e.goal_reached).length, "достигли цели по навыкам", "✓"],
       ],
     )}<div class="hr-grid"><section class="panel"><h2>Где нужна поддержка</h2><p class="sub">Количество сотрудников с разрывом до своей цели</p>${h.gaps
       .slice(0, 7)
@@ -345,7 +353,7 @@ function renderHR() {
       )
       .join(
         "",
-      )}</section><section class="panel"><h2>Участие в активностях</h2><p class="sub">Завершено / всего участий за период датасета</p><div class="table-wrap activity-table"><table><thead><tr><th>Активность</th><th>Завершено</th><th>Пропуски и отказы</th></tr></thead><tbody>${h.events
+      ) || '<p class="notice">Все сотрудники достигли требований своих целей по навыкам.</p>'}</section><section class="panel"><h2>Участие в активностях</h2><p class="sub">Завершено / всего участий за период датасета</p><div class="table-wrap activity-table"><table><thead><tr><th>Активность</th><th>Завершено</th><th>Пропуски и отказы</th></tr></thead><tbody>${h.events
       .slice()
       .sort((a, b) => b.total - a.total)
       .map(
@@ -354,27 +362,28 @@ function renderHR() {
       )
       .join(
         "",
-      )}</tbody></table></div></section></div><section class="panel"><h2>Сотрудники</h2><p class="sub">Список по ID. Данные о вовлечённости доступны только HR.</p><div class="filters"><input id="employee-search" class="search" placeholder="Поиск по имени, ID или роли" aria-label="Поиск сотрудника"><select id="employee-filter" aria-label="Фильтр сотрудников"><option value="all">Все сотрудники</option><option value="no_step">Нет следующего шага</option><option value="inactive">Нет завершений 90 дней</option></select></div><div class="table-wrap"><table><thead><tr><th>Сотрудник</th><th>Роль / грейд</th><th>К цели</th><th>Следующий шаг</th></tr></thead><tbody id="employee-body"></tbody></table></div></section>`,
+      ) || '<tr><td colspan="3" class="table-empty">История участия пока пуста. Загрузите CSV в разделе «Загрузка данных».</td></tr>'}</tbody></table></div></section></div><section class="panel"><h2>Сотрудники</h2><p class="sub">Достижение цели означает соответствие навыков, а не автоматическое повышение. Данные о вовлечённости доступны только HR.</p><div class="filters"><input id="employee-search" class="search" placeholder="Поиск по имени, ID или роли" aria-label="Поиск сотрудника"><select id="employee-filter" aria-label="Фильтр сотрудников"><option value="all">Все сотрудники</option><option value="no_step">Нет следующего шага</option><option value="goal_reached">Цель достигнута</option><option value="inactive">Нет завершений 90 дней</option></select><button class="btn secondary" id="reset-employee-filters">Сбросить</button></div><p id="employee-count" class="sub" role="status"></p><div class="table-wrap"><table><thead><tr><th>Сотрудник</th><th>Роль / грейд</th><th>К цели</th><th>Статус развития</th></tr></thead><tbody id="employee-body"></tbody></table></div></section>`,
   );
   function rows() {
-    const q = document.getElementById("employee-search").value.toLowerCase();
+    const q = document.getElementById("employee-search").value.trim().toLowerCase();
     const f = document.getElementById("employee-filter").value;
-    document.getElementById("employee-body").innerHTML =
-      h.employees
+    const employees = h.employees
         .filter(
           (e) =>
             (e.full_name + " " + e.employee_id + " " + e.role)
               .toLowerCase()
               .includes(q) &&
             (f === "all" ||
-              (f === "no_step" && !e.has_step) ||
+              (f === "no_step" && !e.has_step && !e.goal_reached) ||
+              (f === "goal_reached" && e.goal_reached) ||
               (f === "inactive" && e.inactive)),
-        )
-        .map(
+        );
+    document.getElementById("employee-count").textContent = `Показано: ${employees.length} из ${count}`;
+    document.getElementById("employee-body").innerHTML = employees.map(
           (e) =>
-            `<tr><td><button class="btn text" data-employee="${esc(e.employee_id)}">${esc(e.full_name)}</button><br><small class="muted">${esc(e.employee_id)}</small></td><td>${esc(e.role)}<br><small class="muted">${esc(e.grade)}</small></td><td>${e.progress}%</td><td><span class="tag ${e.has_step ? "" : "amber"}">${e.has_step ? "Подобран" : "Нужен план с HR"}</span></td></tr>`,
+            `<tr><td><button class="btn text" data-employee="${esc(e.employee_id)}">${esc(e.full_name)}</button><br><small class="muted">${esc(e.employee_id)}</small></td><td>${esc(e.role)}<br><small class="muted">${esc(e.grade)}</small></td><td>${e.progress}%</td><td><span class="tag ${e.goal_reached ? "blue" : e.has_step ? "" : "amber"}">${e.goal_reached ? "Цель достигнута" : e.has_step ? "Шаг подобран" : "Нужен план с HR"}</span></td></tr>`,
         )
-        .join("") || '<tr><td colspan="4">Сотрудники не найдены.</td></tr>';
+        .join("") || '<tr><td colspan="4" class="table-empty">Нет сотрудников по выбранным условиям. Измените поиск или нажмите «Сбросить».</td></tr>';
     document.querySelectorAll("[data-employee]").forEach(
       (b) =>
         (b.onclick = async () => {
@@ -394,20 +403,40 @@ function renderHR() {
   rows();
   document.getElementById("employee-search").oninput = rows;
   document.getElementById("employee-filter").onchange = rows;
+  document.getElementById("reset-employee-filters").onclick = () => {
+    document.getElementById("employee-search").value = "";
+    document.getElementById("employee-filter").value = "all";
+    rows();
+  };
 }
 function renderImport() {
   shell(
-    `${heading("Загрузка данных", "Добавь проверочные профили и историю участия в формате датасета.")}<section class="panel"><h2>Новые данные — тот же маршрут</h2><p class="sub">Импорт добавляет новые ID и обновляет существующие. Все данные проверяются до сохранения.</p><form id="import-form"><div class="upload-grid"><label class="upload-box field">Профили сотрудников · JSON<p>Объект с employees, массив профилей или один профиль.</p><input id="profiles-file" type="file" accept=".json,application/json"></label><label class="upload-box field">История участия · CSV<p>Исходные столбцы датасета, кодировка UTF-8.</p><input id="history-file" type="file" accept=".csv,text/csv"></label></div><button class="btn" type="submit">Проверить и загрузить</button><p id="import-result" role="status" class="notice" hidden></p></form></section><p class="footer-note">Каталог мероприятий и требования к ролям остаются исходными. После импорта рекомендации и HR-обзор пересчитываются автоматически.</p>`,
+    `${heading("Загрузка данных", "Добавь проверочные профили и историю участия в формате датасета.")}<section class="panel"><h2>Новые данные — тот же маршрут</h2><p class="sub">Новые ID будут добавлены, совпадающие — обновлены. При ошибке проверки изменения не сохраняются.</p><form id="import-form"><div class="upload-grid"><label class="upload-box field">Профили сотрудников · JSON<p>Объект с employees, массив профилей или один профиль.</p><input id="profiles-file" type="file" accept=".json,application/json"></label><label class="upload-box field">История участия · CSV<p>Исходные столбцы датасета, кодировка UTF-8.</p><input id="history-file" type="file" accept=".csv,text/csv"></label></div><p id="upload-summary" class="sub upload-summary" role="status">Выберите JSON, CSV или оба файла. Общий размер — до 4 МБ.</p><button class="btn" type="submit">Проверить и загрузить</button><p id="import-result" role="status" class="notice" hidden></p><button class="btn secondary" id="open-imported-hr" type="button" hidden>Открыть обзор HR ↗</button></form></section><p class="footer-note">Каталог мероприятий и требования к ролям остаются исходными. После импорта рекомендации и HR-обзор пересчитываются автоматически.</p>`,
   );
+  const selectedFiles = () => [document.getElementById("profiles-file").files[0], document.getElementById("history-file").files[0]].filter(Boolean);
+  const updateSummary = () => {
+    const files = selectedFiles();
+    document.getElementById("upload-summary").textContent = files.length
+      ? `Выбрано файлов: ${files.length} · ${(files.reduce((sum, file) => sum + file.size, 0) / 1000).toFixed(1)} КБ. Готово к проверке.`
+      : "Выберите JSON, CSV или оба файла. Общий размер — до 4 МБ.";
+  };
+  document.getElementById("profiles-file").onchange = updateSummary;
+  document.getElementById("history-file").onchange = updateSummary;
+  document.getElementById("open-imported-hr").onclick = () => navigate("hr");
   document.getElementById("import-form").onsubmit = async (ev) => {
     ev.preventDefault();
     const button = ev.target.querySelector("button"),
       out = document.getElementById("import-result");
     button.disabled = true;
+    button.textContent = "Проверяем и загружаем…";
     out.hidden = true;
+    out.className = "notice";
+    out.setAttribute("role", "status");
+    document.getElementById("open-imported-hr").hidden = true;
     try {
       const pf = document.getElementById("profiles-file").files[0],
         hf = document.getElementById("history-file").files[0];
+      if (!pf && !hf) throw new Error("Выберите файл профилей JSON или истории CSV.");
       if ((pf?.size || 0) + (hf?.size || 0) > 4_000_000)
         throw new Error("Размер файлов должен быть меньше 4 МБ.");
       const result = await api("/import", {
@@ -416,6 +445,7 @@ function renderImport() {
       });
       out.textContent = `Загружено профилей: ${result.profiles}, записей истории: ${result.records}. Открой «Обзор HR», чтобы выбрать сотрудника.`;
       out.hidden = false;
+      document.getElementById("open-imported-hr").hidden = false;
       state.ai = null;
       state.request++;
       state.profile = await api(
@@ -423,9 +453,12 @@ function renderImport() {
       );
     } catch (error) {
       out.textContent = error.message;
+      out.className = "notice notice-error";
+      out.setAttribute("role", "alert");
       out.hidden = false;
     } finally {
       button.disabled = false;
+      button.textContent = "Проверить и загрузить";
     }
   };
 }

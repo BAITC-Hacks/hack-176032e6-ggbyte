@@ -96,14 +96,36 @@ class Store:
             self.db.execute('INSERT OR REPLACE INTO state VALUES (1,?)', (json.dumps({'employees': self.employees, 'history': self.history}, ensure_ascii=False),))
 
     def merge(self, profiles_json, history_csv):
-        incoming = json.loads(profiles_json) if profiles_json.strip() else []
+        if not isinstance(profiles_json, str) or not isinstance(history_csv, str):
+            raise ValueError('Профили и история должны передаваться как текст JSON/CSV.')
+        profiles_json = profiles_json.lstrip('\ufeff')
+        try:
+            incoming = json.loads(profiles_json) if profiles_json.strip() else []
+        except json.JSONDecodeError as exc:
+            raise ValueError(f'Ошибка JSON: строка {exc.lineno}, столбец {exc.colno}. Проверьте формат файла.') from exc
         if isinstance(incoming, dict):
             incoming = incoming.get('employees', [incoming] if 'employee_id' in incoming else None)
         if not isinstance(incoming, list):
             raise ValueError('JSON должен содержать список employees или профиль сотрудника.')
         if any(not isinstance(e, dict) for e in incoming):
             raise ValueError('Каждый профиль должен быть JSON-объектом.')
-        records = list(csv.DictReader(io.StringIO(history_csv.lstrip('\ufeff')))) if history_csv.strip() else []
+        records = []
+        if history_csv.strip():
+            reader = csv.DictReader(io.StringIO(history_csv.lstrip('\ufeff')), strict=True)
+            try:
+                columns = reader.fieldnames or []
+                if len(set(columns)) != len(columns):
+                    raise ValueError('Повторяющиеся названия столбцов CSV.')
+                required = {'record_id', 'employee_id', 'event_id', 'date', 'status', 'completion_pct'}
+                missing = required - set(columns)
+                if missing:
+                    raise ValueError('В CSV отсутствуют столбцы: ' + ', '.join(sorted(missing)) + '.')
+                for row in reader:
+                    if None in row or any(value is None for value in row.values()):
+                        raise ValueError(f'CSV: строка {reader.line_num} содержит неверное число столбцов.')
+                    records.append(row)
+            except csv.Error as exc:
+                raise ValueError(f'Ошибка CSV: строка {reader.line_num}. Проверьте кавычки и разделители.') from exc
         if not incoming and not records:
             raise ValueError('Выберите хотя бы один непустой файл.')
         # Reject duplicates inside the upload before merging by identifier.

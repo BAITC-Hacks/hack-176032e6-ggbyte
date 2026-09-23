@@ -76,6 +76,26 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.call('/api/profile?id=JURY_API')[0], 200)
         self.assertEqual(self.call('/api/import', {'profiles': '[1,2]'})[0], 400)
 
+    def test_hr_distinguishes_goal_reached_from_no_available_step(self):
+        self.login('hr')
+        status, summary = self.call('/api/hr')
+        self.assertEqual(status, 200)
+        ready = next(e for e in summary['employees'] if e['employee_id'] == 'DEMO2')
+        self.assertTrue(ready['goal_reached'])
+        self.assertFalse(ready['has_step'])
+        starter = next(e for e in summary['employees'] if e['employee_id'] == 'DEMO3')
+        self.assertFalse(starter['goal_reached'])
+
+    def test_import_rejects_non_text_fields_without_changing_data(self):
+        self.login('hr')
+        before = copy.deepcopy(server.STORE.employees)
+        for payload in ({'profiles': None}, {'history': []}, {'profiles': {}}):
+            with self.subTest(payload=payload):
+                status, response = self.call('/api/import', payload)
+                self.assertEqual(status, 400)
+                self.assertIn('error', response)
+                self.assertEqual(server.STORE.employees, before)
+
     def test_cross_origin_mutation_rejected_and_secrets_not_served(self):
         self.assertEqual(self.call('/api/login', {}, 'https://untrusted.example')[0], 403)
         self.assertEqual(self.call('/.env')[0], 404)
@@ -86,6 +106,7 @@ class ApiTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as error:
             self.client.open(request)
         self.assertEqual(error.exception.code, 403)
+        error.exception.close()
 
     def test_cloud_requires_explicit_opt_in(self):
         from career.ai import configuration

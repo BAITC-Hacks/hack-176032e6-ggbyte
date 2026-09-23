@@ -508,6 +508,16 @@ button {
   gap: 18px;
   margin: 22px 0 31px;
 }
+.stats-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.stats-4 .stat {
+  padding: 18px 16px;
+  gap: 10px;
+}
+.stats-4 .stat-icon {
+  flex-shrink: 0;
+}
 .stat {
   border: 1px solid var(--line);
   background: white;
@@ -745,6 +755,20 @@ details li {
   margin: 18px 0;
   color: #476346;
 }
+.notice-error {
+  background: #fff3f0;
+  border-color: #e6b3a9;
+  color: #8e3225;
+}
+.upload-summary {
+  margin-bottom: 18px;
+}
+.table-empty {
+  padding: 28px 20px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.7;
+}
 .activity-table {
   max-height: 380px;
 }
@@ -793,6 +817,9 @@ td button {
   gap: 12px;
   margin: 18px 0;
   align-items: center;
+}
+.filters .btn {
+  flex-shrink: 0;
 }
 .filters select {
   padding: 12px;
@@ -950,6 +977,9 @@ td button {
   }
   .stats {
     gap: 10px;
+  }
+  .stats-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .stat {
     padding: 16px 12px;

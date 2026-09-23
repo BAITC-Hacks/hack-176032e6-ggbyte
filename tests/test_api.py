@@ -76,6 +76,14 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.call('/api/profile?id=JURY_API')[0], 200)
         self.assertEqual(self.call('/api/import', {'profiles': '[1,2]'})[0], 400)
 
+    def test_hr_includes_events_without_participation(self):
+        self.login('hr')
+        status, summary = self.call('/api/hr')
+        self.assertEqual(status, 200)
+        self.assertEqual(len(summary['events']), len(server.STORE.events))
+        empty = next(e for e in summary['events'] if e['title'] == server.STORE.events['DEMO_FUTURE']['title'])
+        self.assertEqual((empty['total'], empty['completed'], empty['missed']), (0, 0, 0))
+
     def test_cross_origin_mutation_rejected_and_secrets_not_served(self):
         self.assertEqual(self.call('/api/login', {}, 'https://untrusted.example')[0], 403)
         self.assertEqual(self.call('/.env')[0], 404)

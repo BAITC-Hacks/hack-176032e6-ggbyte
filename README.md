@@ -282,6 +282,7 @@ HR-импорт принимает JSON `{ "employees": [...] }`, массив �
 
 - [Сценарий защиты и работа с Git](docs/DEMO.md).
 - [Сверка с требованиями и результаты локальных проверок](docs/REQUIREMENTS.md).
+- [Отчёт о проверке работоспособности и её ограничениях](docs/QA.md).
 - [Шаблон настройки провайдеров](.env.example).
 - [Исходное ТЗ Career Quest](https://docs.google.com/document/d/18SlxWxz_Vj_eag_UfEQ6t6g59jCxGTgu5x4QoylDbqI/preview).
 

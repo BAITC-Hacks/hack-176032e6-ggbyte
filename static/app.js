@@ -372,7 +372,7 @@ function renderHR() {
         )
         .map(
           (e) =>
-            `<tr><td><button class="btn text" data-employee="${esc(e.employee_id)}">${esc(e.full_name)}</button><br><small class="muted">${esc(e.employee_id)}</small></td><td>${esc(e.role)}<br><small class="muted">${esc(e.grade)}</small></td><td>${e.progress}%</td><td><span class="tag ${e.has_step ? "" : "amber"}">${e.has_step ? "Подобран" : "Нужен план с HR"}</span></td></tr>`,
+            `<tr><td><button class="btn text" data-employee="${esc(e.employee_id)}">${esc(e.full_name)}</button><br><small class="muted">${esc(e.employee_id)}</small></td><td>${esc(e.role)}<br><small class="muted">${esc(e.grade)}</small></td><td>${e.progress}%</td><td><span class="tag ${e.has_step || e.progress === 100 ? "" : "amber"}">${e.has_step ? "Подобран" : e.progress === 100 ? "Цель достигнута" : "Нужен план с HR"}</span></td></tr>`,
         )
         .join("") || '<tr><td colspan="4">Сотрудники не найдены.</td></tr>';
     document.querySelectorAll("[data-employee]").forEach(

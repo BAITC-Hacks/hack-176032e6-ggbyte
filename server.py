@@ -113,7 +113,7 @@ class Handler(BaseHTTPRequestHandler):
             recent = [r for r in p['history'] if r['date'] >= recent_start and not STORE.events[r['event_id']]['mandatory']]
             employees.append({'employee_id': e['employee_id'], 'full_name': e['full_name'], 'role': e['role'], 'grade': e['grade'],
                               'progress': p['progress'], 'has_step': bool(p['recommendations']), 'inactive': not any(r['status'] == 'completed' for r in recent)})
-        counts = defaultdict(Counter)
+        counts = {eid: Counter() for eid in STORE.events}
         for row in STORE.history:
             if row['date'] <= STORE.today:
                 counts[row['event_id']][row['status']] += 1
